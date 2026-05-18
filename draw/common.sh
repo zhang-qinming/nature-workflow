@@ -17,6 +17,8 @@ LOGS_ROOT="${LOGS_ROOT:-$(pwd)/logs}"
 # 输入数据路径
 # cNMF regulation 数据（跑一次的，在 Nature/mine/code/outputs/ 下）
 CNMF_REGULATION_DIR="${CNMF_REGULATION_DIR:-/gpfs/chencao/qinminzhang/Nature/mine/code/outputs/perturbseq/cnmf_genomewide/cNMF_regulation/K562GW}"
+# cNMF spectra 矩阵（跑一次的）
+SPECTRA_PATH="${SPECTRA_PATH:-/gpfs/chencao/qinminzhang/Nature/mine/code/outputs/perturbseq/cnmf_genomewide/cNMF/cNMF_all/cNMF_all.gene_spectra_score.k_60.dt_0_5.txt}"
 # cNMF trait association 数据（分 trait 跑的，在 run_all/outputs/ 下）
 PROGRAM_ASSOC_DIR="${PROGRAM_ASSOC_DIR:-/gpfs/chencao/qinminzhang/workflow/catalog_lof/run_all/outputs/perturbseq/cnmf_genomewide/trait_association/K562GW/ProgramLevel}"
 
@@ -26,11 +28,11 @@ POSTERIOR_DIR="${POSTERIOR_DIR:-/gpfs/chencao/qinminzhang/workflow/catalog_lof/r
 LIMMA_PATH="${LIMMA_PATH:-/gpfs/chencao/qinminzhang/Nature/mine/code/outputs/perturbseq/gene_level/K562GW/limma_logFC_sum.txt}"
 SHET_PATH="${SHET_PATH:-/gpfs/chencao/qinminzhang/Nature/mine/code/data/shet_10bins.txt}"
 
-# 静态参考数据（在 Nature/mine/code/data/ 下）
-GENE_MAP="${GENE_MAP:-${PROJECT_ROOT}/data/gencode_v41_gname_gid_ALL_sorted_onlyID}"
-GENESET_DIR="${GENESET_DIR:-${PROJECT_ROOT}/data/geneset}"
-GENE_ANNOTATION="${GENE_ANNOTATION:-${PROJECT_ROOT}/data/GWAS/genes.protein_coding.v39.gtf}"
-FILE_ID_MAP="${FILE_ID_MAP:-${PROJECT_ROOT}/configs/path.file_id_map.tsv}"
+# 静态参考数据（硬编码绝对路径，避免 PROJECT_ROOT 被覆盖导致解析错误）
+GENE_MAP="${GENE_MAP:-/gpfs/chencao/qinminzhang/Nature/mine/code/data/gencode_v41_gname_gid_ALL_sorted_onlyID}"
+GENESET_DIR="${GENESET_DIR:-/gpfs/chencao/qinminzhang/Nature/mine/code/data/geneset}"
+GENE_ANNOTATION="${GENE_ANNOTATION:-/gpfs/chencao/qinminzhang/Nature/mine/code/data/GWAS/genes.protein_coding.v39.gtf}"
+FILE_ID_MAP="${FILE_ID_MAP:-/gpfs/chencao/qinminzhang/Nature/mine/code/configs/path.file_id_map.tsv}"
 POSTERIOR_NAME_MAP="${POSTERIOR_NAME_MAP:-}"
 
 # 基因集：默认自动扫描，也可手动指定

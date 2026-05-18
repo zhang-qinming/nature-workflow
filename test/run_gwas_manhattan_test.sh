@@ -35,8 +35,8 @@ CONFIG_FILE="${PROJECT_ROOT}/test/gwas_manhattan_test.yaml"
 FILE_ID_MAP="${PROJECT_ROOT}/configs/path.file_id_map.tsv"
 
 # ---- 共享参考文件路径 ----
-REF_BASE="/gpfs/chencao/qinminzhang/Nature/mine/code/outputs"
-GENE_ANNOTATION="${REF_BASE}/genes.protein_coding.v39.gtf"
+REF_BASE="/gpfs/chencao/qinminzhang/Nature/mine/code/data"
+GENE_ANNOTATION="${REF_BASE}/GWAS/genes.protein_coding.v39.gtf"
 GENE_MAP="${REF_BASE}/gencode_v41_gname_gid_ALL_sorted_onlyID"
 GENESET_DIR="${REF_BASE}/geneset"
 

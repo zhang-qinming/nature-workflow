@@ -181,11 +181,12 @@ FIGURE_POSTERIOR_DIR="${FIGURE_POSTERIOR_DIR:-${ARTIFACT_ROOT}/genebayes/posteri
 # cNMF regulation（跑一次）在 Nature/mine/code/outputs，association（分 trait）在 run_all/outputs
 FIGURE_CNMF_REGULATION_DIR="${FIGURE_CNMF_REGULATION_DIR:-/gpfs/chencao/qinminzhang/Nature/mine/code/outputs/perturbseq/cnmf_genomewide/cNMF_regulation/K562GW}"
 FIGURE_PROGRAM_ASSOCIATION_DIR="${FIGURE_PROGRAM_ASSOCIATION_DIR:-/gpfs/chencao/qinminzhang/workflow/catalog_lof/run_all/outputs/perturbseq/cnmf_genomewide/trait_association/K562GW/ProgramLevel}"
-FIGURE_LIMMA_PATH="${FIGURE_LIMMA_PATH:-${ARTIFACT_ROOT}/perturbseq/gene_level/K562GW/limma_logFC_sum.txt}"
-FIGURE_SHET_PATH="${FIGURE_SHET_PATH:-${PROJECT_ROOT}/data/shet_10bins.txt}"
-FIGURE_GENE_MAP="${FIGURE_GENE_MAP:-${PROJECT_ROOT}/data/gencode_v41_gname_gid_ALL_sorted_onlyID}"
-FIGURE_GENESET_DIR="${FIGURE_GENESET_DIR:-${PROJECT_ROOT}/data/geneset}"
-FIGURE_GENE_ANNOTATION="${FIGURE_GENE_ANNOTATION:-${PROJECT_ROOT}/data/GWAS/genes.protein_coding.v39.gtf}"
+FIGURE_LIMMA_PATH="${FIGURE_LIMMA_PATH:-/gpfs/chencao/qinminzhang/Nature/mine/code/outputs/perturbseq/gene_level/K562GW/limma_logFC_sum.txt}"
+FIGURE_SHET_PATH="${FIGURE_SHET_PATH:-/gpfs/chencao/qinminzhang/Nature/mine/code/data/shet_10bins.txt}"
+FIGURE_SPECTRA_PATH="${FIGURE_SPECTRA_PATH:-/gpfs/chencao/qinminzhang/Nature/mine/code/outputs/perturbseq/cnmf_genomewide/cNMF/cNMF_all/cNMF_all.gene_spectra_score.k_60.dt_0_5.txt}"
+FIGURE_GENE_MAP="${FIGURE_GENE_MAP:-/gpfs/chencao/qinminzhang/Nature/mine/code/data/gencode_v41_gname_gid_ALL_sorted_onlyID}"
+FIGURE_GENESET_DIR="${FIGURE_GENESET_DIR:-/gpfs/chencao/qinminzhang/Nature/mine/code/data/geneset}"
+FIGURE_GENE_ANNOTATION="${FIGURE_GENE_ANNOTATION:-/gpfs/chencao/qinminzhang/Nature/mine/code/data/GWAS/genes.protein_coding.v39.gtf}"
 
 # 输出子目录（worker 函数引用，必须在它们定义之前）
 LOF_ROOT="${BATCH_ROOT}/lof"
@@ -859,6 +860,8 @@ if is_truthy "${FIGURE_ENABLE_CNMF_PROGRAM_TOP_GENES}"; then
     write_config_header "${config_path}"
     cat >> "${config_path}" <<EOF
     cnmf_program_top_genes:
+      inputs:
+        spectra_path: $(yaml_quote "${FIGURE_SPECTRA_PATH}")
       parameters:
         k: ${FIGURE_CNMF_K}
 EOF
@@ -879,6 +882,8 @@ if is_truthy "${FIGURE_ENABLE_CNMF_PROGRAM_ENRICHMENT}"; then
     write_config_header "${config_path}"
     cat >> "${config_path}" <<YAML_EOF
     cnmf_program_enrichment:
+      inputs:
+        spectra_path: $(yaml_quote "${FIGURE_SPECTRA_PATH}")
       parameters:
         k: ${FIGURE_CNMF_K}
         genesets:

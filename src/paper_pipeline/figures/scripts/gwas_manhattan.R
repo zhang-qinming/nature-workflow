@@ -80,13 +80,12 @@ if (has_genesets) {
     gwas_df$geneset[chr_mask]       <- chr_geneset
     gwas_df$geneset_color[chr_mask] <- chr_geneset_color
 
-    # 收集可标注位点
+    # 收集可标注位点（需要 neg_log10_p 给 ggplot 用，提前算）
     sig_chr_mask <- chr_mask & gwas_df$P <= label_p_threshold & gwas_df$geneset != ""
     if (any(sig_chr_mask)) {
-      label_candidates <- rbind(
-        label_candidates,
-        gwas_df[sig_chr_mask, c("CHROM", "POS", "P", "COORD", "geneset", "geneset_color"), drop = FALSE]
-      )
+      sub <- gwas_df[sig_chr_mask, c("CHROM", "POS", "P", "COORD", "geneset", "geneset_color"), drop = FALSE]
+      sub$neg_log10_p <- -log10(pmax(sub$P, .Machine$double.xmin))
+      label_candidates <- rbind(label_candidates, sub)
     }
   }
 
@@ -113,7 +112,7 @@ if (has_genesets) {
   label_candidates <- data.frame(
     CHROM = character(), POS = numeric(), P = numeric(),
     COORD = numeric(), geneset = character(), geneset_color = character(),
-    LABEL = character(), stringsAsFactors = FALSE
+    neg_log10_p = numeric(), LABEL = character(), stringsAsFactors = FALSE
   )
 }
 
@@ -152,7 +151,11 @@ if (length(unique_sets) > 0) {
 
 g <- ggplot(gwas_df, aes(x = COORD, y = neg_log10_p, color = geneset_color))
 g <- g + theme_classic(base_size = 20, base_family = "Helvetica")
-g <- g + ggrastr::geom_point_rast(alpha = 0.3, size = 0.8)
+if (nrow(gwas_df) > 8000000) {
+  g <- g + geom_point(alpha = 0.1, size = 0.3, shape = ".")
+} else {
+  g <- g + ggrastr::geom_point_rast(alpha = 0.3, size = 0.8, raster.dpi = 200)
+}
 g <- g + geom_hline(yintercept = -log10(genomewide_threshold), linetype = "dashed", color = "red")
 
 if (nrow(label_candidates) > 0) {

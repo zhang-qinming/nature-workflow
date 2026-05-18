@@ -23,9 +23,9 @@ workflows:
   figures:
     shared_inputs:
       file_id_map: ../configs/path.file_id_map.tsv
-      gene_annotation: /gpfs/chencao/qinminzhang/Nature/mine/code/outputs/genes.protein_coding.v39.gtf
-      gene_map: /gpfs/chencao/qinminzhang/Nature/mine/code/outputs/gencode_v41_gname_gid_ALL_sorted_onlyID
-      geneset_dir: /gpfs/chencao/qinminzhang/Nature/mine/code/outputs/geneset
+      gene_annotation: /gpfs/chencao/qinminzhang/Nature/mine/code/data/GWAS/genes.protein_coding.v39.gtf
+      gene_map: /gpfs/chencao/qinminzhang/Nature/mine/code/data/gencode_v41_gname_gid_ALL_sorted_onlyID
+      geneset_dir: /gpfs/chencao/qinminzhang/Nature/mine/code/data/geneset
 
     shared_parameters:
       highlight_genesets:

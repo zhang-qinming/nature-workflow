@@ -22,6 +22,8 @@ write_config_header "$cfg"
 if [[ -n "$PROGRAMS" ]]; then
     cat >> "$cfg" <<YEOF
     cnmf_program_top_genes:
+      inputs:
+        spectra_path: $(yaml_quote "$SPECTRA_PATH")
       parameters:
         k: ${K}
         top_n: ${TOP_N}
@@ -30,6 +32,8 @@ YEOF
 else
     cat >> "$cfg" <<YEOF
     cnmf_program_top_genes:
+      inputs:
+        spectra_path: $(yaml_quote "$SPECTRA_PATH")
       parameters:
         k: ${K}
         top_n: ${TOP_N}
