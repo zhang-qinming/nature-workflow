@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.env
+.venv
+env/
+venv/
+ENV/
+
+# R
+.Rhistory
+.Rapp.history
+.RData
+.Ruserdata
+.Rproj.user/
+
+# Slurm / HPC Logs
+slurm-*.out
+*.log
+*.err
+*.out
+
+# Project Outputs & Data
+/outputs/
+/data/
+/results/
+/scripts/
+/code.backup/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+.claude
+.serena
+CLAUDE.md
+paper_pipeline.txt
+code.tree
