@@ -37,8 +37,8 @@ slurm-*.out
 .idea/
 .DS_Store
 Thumbs.db
-.claude
-.serena
+.claude/
+.serena/
 CLAUDE.md
 paper_pipeline.txt
 code.tree
