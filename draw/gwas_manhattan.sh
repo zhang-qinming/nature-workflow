@@ -16,7 +16,8 @@ GENOMEWIDE_P="${GMAN_GENOMEWIDE_P:-5e-8}"
 
 mkdir -p "$BATCH_DIR" "$LOG_DIR"
 rm -rf "${BATCH_DIR:?}"/*
-_build_gs_yaml
+_build_gs_yaml "$HIGHLIGHT_GENESETS" HL_GS_YAML
+_build_gs_yaml "$GENESET_LIST" GS_YAML
 
 gwas_ids=()
 while IFS= read -r id; do gwas_ids+=("$id"); done < <(awk -F'\t' 'NR>1 && $1!=""{print $1}' "$FILE_ID_MAP" | sort -u)
@@ -36,6 +37,7 @@ for gwas_id in "${gwas_ids[@]}"; do
         label_p_threshold: ${LABEL_P}
         genomewide_threshold: ${GENOMEWIDE_P}
         highlight_genesets:
+${HL_GS_YAML}        data_genesets:
 ${GS_YAML}
 YEOF
 

@@ -35,6 +35,9 @@ GENE_ANNOTATION="${GENE_ANNOTATION:-/gpfs/chencao/qinminzhang/Nature/mine/code/d
 FILE_ID_MAP="${FILE_ID_MAP:-/gpfs/chencao/qinminzhang/Nature/mine/code/configs/path.file_id_map.tsv}"
 POSTERIOR_NAME_MAP="${POSTERIOR_NAME_MAP:-}"
 
+# 图上高亮的基因集（4 个，保持图可读性）
+HIGHLIGHT_GENESETS="${HIGHLIGHT_GENESETS:-HALLMARK_HEME_METABOLISM,Hematopoiesisgenes,mitotic_cell_cycle,positive_macromolecule_synthesis}"
+
 # 基因集：默认自动扫描，也可手动指定
 if [[ -z "${GENESET_LIST:-}" && -d "${GENESET_DIR}" ]]; then
     GENESET_LIST=""
@@ -168,13 +171,13 @@ YEOF
 
 # 基因集 YAML 列表（预计算一次）
 _build_gs_yaml() {
-    local result=""; IFS=',' read -r -a arr <<< "${GENESET_LIST}"
+    local result=""; IFS=',' read -r -a arr <<< "${1}"
     for gs in "${arr[@]}"; do
         [[ -z "$gs" ]] && continue
         gs="${gs//\'/\'\'}"
         result+="          - '${gs}'"$'\n'
     done
-    GS_YAML="$result"
+    eval "$2=\"\$result\""
 }
 
 # ============================================================

@@ -18,7 +18,7 @@ rm -rf "${BATCH_DIR:?}"/*
 cfg="${BATCH_DIR}/pipeline.${FIG_NAME}.yaml"; spath="${BATCH_DIR}/figures_${FIG_NAME}.sh"
 echo "[${FIG_NAME}] $(date)"
 
-_build_gs_yaml
+_build_gs_yaml "$GENESET_LIST" GS_YAML
 
 write_config_header "$cfg"
 if [[ -n "$PROGRAMS" ]]; then

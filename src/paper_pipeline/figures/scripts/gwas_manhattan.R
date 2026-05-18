@@ -9,6 +9,7 @@ plot_prefix <- as.character(args[6])
 flank_bp <- if (length(args) >= 7) as.numeric(args[7]) else 50000
 label_p_threshold <- if (length(args) >= 8) as.numeric(args[8]) else 1e-30
 genomewide_threshold <- if (length(args) >= 9) as.numeric(args[9]) else 5e-8
+data_genesets_raw <- if (length(args) >= 10 && nzchar(args[10])) as.character(args[10]) else ""
 
 script_path_arg <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
 script_dir <- if (length(script_path_arg) > 0) {
@@ -29,7 +30,7 @@ axis_df <- coord_data$axis
 
 gene_annotation <- read_gene_annotation_table(gene_annotation_path)
 
-# 构建基因集区间表
+# ── 画图着色用的基因集区间表（highlight_genesets, 默认4个） ──
 region_rows <- list()
 for (geneset_name in highlight_genesets) {
   genes <- read_geneset_members(geneset_dir, geneset_name)
@@ -45,7 +46,29 @@ for (geneset_name in highlight_genesets) {
 region_df <- do.call(rbind, region_rows)
 has_genesets <- !is.null(region_df) && nrow(region_df) > 0
 
-# 给每个变异点累积全部匹配的基因集（; 分隔），同时记录第一个用于着色
+# ── 数据导出的全量基因集区间表（data_genesets, 全部54个） ──
+data_genesets <- if (nzchar(data_genesets_raw)) {
+  sets <- trimws(strsplit(data_genesets_raw, ",", fixed = TRUE)[[1]])
+  sets[nzchar(sets)]
+} else {
+  character()
+}
+data_region_rows <- list()
+for (geneset_name in data_genesets) {
+  genes <- read_geneset_members(geneset_dir, geneset_name)
+  gene_rows <- gene_annotation[gene_annotation$gene %in% genes, c("gene", "chr", "start", "end")]
+  if (nrow(gene_rows) == 0) next
+  gene_rows$chr <- sub("^chr", "", as.character(gene_rows$chr))
+  gene_rows$region_start <- gene_rows$start - flank_bp
+  gene_rows$region_end   <- gene_rows$end   + flank_bp
+  gene_rows$geneset_name <- geneset_name
+  gene_rows$display_name <- friendly_geneset_name(geneset_name)
+  data_region_rows[[length(data_region_rows) + 1]] <- gene_rows
+}
+data_region_df <- do.call(rbind, data_region_rows)
+has_data_genesets <- !is.null(data_region_df) && nrow(data_region_df) > 0
+
+# ── 着色（用 highlight_genesets） ──
 gwas_df$geneset       <- ""
 gwas_df$geneset_color <- "background"
 label_candidates <- data.frame()
@@ -58,27 +81,24 @@ if (has_genesets) {
     chr_regions <- region_df[region_df$chr == chr, , drop = FALSE]
     if (nrow(chr_regions) == 0) next
 
-    # rev() 让后遍历的基因集先出现在列表前部
     chr_regions <- chr_regions[nrow(chr_regions):1, ]
-
     chr_pos <- gwas_df$POS[chr_mask]
-    chr_geneset       <- rep("", sum(chr_mask))
     chr_geneset_color <- rep("background", sum(chr_mask))
 
     for (j in seq_len(nrow(chr_regions))) {
       in_region <- chr_pos >= chr_regions$region_start[j] &
                    chr_pos <= chr_regions$region_end[j]
-      # 累积全部匹配
-      chr_geneset[in_region] <- ifelse(
-        nchar(chr_geneset[in_region]) == 0,
-        chr_regions$display_name[j],
-        paste(chr_geneset[in_region], chr_regions$display_name[j], sep = ";")
-      )
-      # 着色用最后一个 rev 后匹配到的
       chr_geneset_color[in_region] <- chr_regions$display_name[j]
     }
-    gwas_df$geneset[chr_mask]       <- chr_geneset
     gwas_df$geneset_color[chr_mask] <- chr_geneset_color
+
+    # 收集可标注位点
+    sig_chr_mask <- chr_mask & gwas_df$P <= label_p_threshold & gwas_df$geneset_color != "background"
+    if (any(sig_chr_mask)) {
+      sub <- gwas_df[sig_chr_mask, c("CHROM", "POS", "P", "COORD", "geneset_color"), drop = FALSE]
+      sub$neg_log10_p <- -log10(pmax(sub$P, .Machine$double.xmin))
+      label_candidates <- rbind(label_candidates, sub)
+    }
 
     # 收集可标注位点（需要 neg_log10_p 给 ggplot 用，提前算）
     sig_chr_mask <- chr_mask & gwas_df$P <= label_p_threshold & gwas_df$geneset != ""
@@ -116,6 +136,28 @@ if (has_genesets) {
   )
 }
 
+# ── 数据导出：用 data_genesets 填充 geneset 列（全部54个基因集） ──
+if (has_data_genesets) {
+  all_chroms <- unique(gwas_df$CHROM)
+  for (chr in all_chroms) {
+    chr_mask <- gwas_df$CHROM == chr
+    chr_dregions <- data_region_df[data_region_df$chr == chr, , drop = FALSE]
+    if (nrow(chr_dregions) == 0) next
+    chr_dregions <- chr_dregions[nrow(chr_dregions):1, ]
+    chr_pos <- gwas_df$POS[chr_mask]
+    chr_geneset <- rep("", sum(chr_mask))
+    for (j in seq_len(nrow(chr_dregions))) {
+      in_region <- chr_pos >= chr_dregions$region_start[j] &
+                   chr_pos <= chr_dregions$region_end[j]
+      chr_geneset[in_region] <- ifelse(
+        nchar(chr_geneset[in_region]) == 0,
+        chr_dregions$display_name[j],
+        paste(chr_geneset[in_region], chr_dregions$display_name[j], sep = ";")
+      )
+    }
+    gwas_df$geneset[chr_mask] <- chr_geneset
+  }
+}
 gwas_df$geneset[gwas_df$geneset == ""] <- "background"
 gwas_df$neg_log10_p <- -log10(pmax(gwas_df$P, .Machine$double.xmin))
 ensure_parent_dir(table_path)

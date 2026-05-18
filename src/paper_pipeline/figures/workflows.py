@@ -79,6 +79,7 @@ class ResolvedFiguresBurdenVolcano:
     output_dir: Path
     targets: tuple[FileTarget, ...]
     highlight_genesets: tuple[str, ...]
+    data_genesets: tuple[str, ...]
     label_fdr_threshold: float
     line_fdr_threshold: float
 
@@ -91,6 +92,7 @@ class ResolvedFiguresGwasManhattan:
     output_dir: Path
     targets: tuple[FileTarget, ...]
     highlight_genesets: tuple[str, ...]
+    data_genesets: tuple[str, ...]
     flank_bp: int
     label_p_threshold: float
     genomewide_threshold: float
@@ -552,6 +554,10 @@ def _resolve_figures_burden_volcano(config: LoadedConfig) -> ResolvedFiguresBurd
         parameters.get("highlight_genesets"),
         "workflows.figures.burden_volcano.parameters.highlight_genesets",
     ) or DEFAULT_HIGHLIGHT_GENESETS
+    data_genesets = _string_list(
+        parameters.get("data_genesets"),
+        "workflows.figures.burden_volcano.parameters.data_genesets",
+    ) or highlight_genesets
 
     return ResolvedFiguresBurdenVolcano(
         config=config,
@@ -561,6 +567,7 @@ def _resolve_figures_burden_volcano(config: LoadedConfig) -> ResolvedFiguresBurd
         output_dir=config.resolve_path_or_artifact(outputs.get("output_dir"), "burden_volcano"),
         targets=targets,
         highlight_genesets=highlight_genesets,
+        data_genesets=data_genesets,
         label_fdr_threshold=float(parameters.get("label_fdr_threshold", 0.01)),
         line_fdr_threshold=float(parameters.get("line_fdr_threshold", 0.1)),
     )
@@ -646,6 +653,10 @@ def _resolve_figures_gwas_manhattan(config: LoadedConfig) -> ResolvedFiguresGwas
         parameters.get("highlight_genesets"),
         "workflows.figures.gwas_manhattan.parameters.highlight_genesets",
     ) or DEFAULT_HIGHLIGHT_GENESETS
+    data_genesets = _string_list(
+        parameters.get("data_genesets"),
+        "workflows.figures.gwas_manhattan.parameters.data_genesets",
+    ) or highlight_genesets
 
     return ResolvedFiguresGwasManhattan(
         config=config,
@@ -654,6 +665,7 @@ def _resolve_figures_gwas_manhattan(config: LoadedConfig) -> ResolvedFiguresGwas
         output_dir=config.resolve_path_or_artifact(outputs.get("output_dir"), "gwas_manhattan"),
         targets=targets,
         highlight_genesets=highlight_genesets,
+        data_genesets=data_genesets,
         flank_bp=int(parameters.get("flank_bp", 50000)),
         label_p_threshold=float(parameters.get("label_p_threshold", 1e-30)),
         genomewide_threshold=float(parameters.get("genomewide_threshold", 5e-8)),
@@ -1252,6 +1264,7 @@ def build_figures_burden_volcano_tasks(config: LoadedConfig) -> list[Task]:
         _ensure_directory_task(meta_dir, "figures-burden-volcano meta"),
     ]
     geneset_arg = ",".join(resolved.highlight_genesets)
+    data_geneset_arg = ",".join(resolved.data_genesets)
     manifest_rows: list[dict[str, str]] = []
 
     for target in resolved.targets:
@@ -1268,6 +1281,7 @@ def build_figures_burden_volcano_tasks(config: LoadedConfig) -> list[Task]:
             plot_prefix,
             resolved.label_fdr_threshold,
             resolved.line_fdr_threshold,
+            data_geneset_arg,
         )
         tasks.append(
             Task(
@@ -1356,6 +1370,7 @@ def build_figures_gwas_manhattan_tasks(config: LoadedConfig) -> list[Task]:
         _ensure_directory_task(meta_dir, "figures-gwas-manhattan meta"),
     ]
     geneset_arg = ",".join(resolved.highlight_genesets)
+    data_geneset_arg = ",".join(resolved.data_genesets)
     manifest_rows: list[dict[str, str]] = []
 
     for target in resolved.targets:
@@ -1373,6 +1388,7 @@ def build_figures_gwas_manhattan_tasks(config: LoadedConfig) -> list[Task]:
             resolved.flank_bp,
             resolved.label_p_threshold,
             resolved.genomewide_threshold,
+            data_geneset_arg,
         )
         tasks.append(
             Task(

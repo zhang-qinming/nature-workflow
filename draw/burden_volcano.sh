@@ -22,7 +22,8 @@ check_inputs "$FIG_NAME" \
   "file_id_map     " "$FILE_ID_MAP"  "static    " yes \
   "posterior_dir   " "$POSTERIOR_DIR" "per-trait" yes \
   || exit 1
-_build_gs_yaml
+_build_gs_yaml "$HIGHLIGHT_GENESETS" HL_GS_YAML
+_build_gs_yaml "$GENESET_LIST" GS_YAML
 
 lof_ids=()
 while IFS= read -r id; do lof_ids+=("$id"); done < <(awk -F'\t' 'NR>1 && $2!=""{print $2}' "$FILE_ID_MAP" | sort -u)
@@ -41,6 +42,7 @@ for lof_id in "${lof_ids[@]}"; do
         label_fdr_threshold: ${LABEL_FDR}
         line_fdr_threshold: ${LINE_FDR}
         highlight_genesets:
+${HL_GS_YAML}        data_genesets:
 ${GS_YAML}
 YEOF
 

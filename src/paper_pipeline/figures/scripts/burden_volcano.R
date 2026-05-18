@@ -8,6 +8,7 @@ table_path <- as.character(args[5])
 plot_prefix <- as.character(args[6])
 label_fdr_threshold <- if (length(args) >= 7) as.numeric(args[7]) else 0.01
 line_fdr_threshold <- if (length(args) >= 8) as.numeric(args[8]) else 0.1
+data_genesets_raw <- if (length(args) >= 9 && nzchar(args[9])) as.character(args[9]) else ""
 
 script_path_arg <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
 script_dir <- if (length(script_path_arg) > 0) {
@@ -37,21 +38,31 @@ df <- lof[, c("beta", "P", "ensg")]
 df$FDR <- p.adjust(df$P, method = "BH")
 df$LABEL <- label_from_ensg(df$ensg, gene_map_path)
 
-# 累积全部匹配的基因集（; 分隔），同时记录第一个匹配的用于画图着色
-df$geneset       <- ""
+# 画图着色：只用 highlight_genesets（默认4个）
 df$geneset_color <- "other"
 for (geneset_name in rev(highlight_genesets)) {
   members <- read_geneset_members(geneset_dir, geneset_name)
   mask <- df$LABEL %in% members
+  df$geneset_color[mask] <- friendly_geneset_name(geneset_name)
+}
+
+# 数据记录：用 data_genesets（全部54个），累积全部匹配
+data_genesets <- if (nzchar(data_genesets_raw)) {
+  sets <- trimws(strsplit(data_genesets_raw, ",", fixed = TRUE)[[1]])
+  sets[nzchar(sets)]
+} else {
+  character()
+}
+df$geneset <- ""
+for (geneset_name in rev(data_genesets)) {
+  members <- read_geneset_members(geneset_dir, geneset_name)
+  mask <- df$LABEL %in% members
   display <- friendly_geneset_name(geneset_name)
-  # 累积全部匹配
   df$geneset[mask] <- ifelse(
     nchar(df$geneset[mask]) == 0,
     display,
     paste(df$geneset[mask], display, sep = ";")
   )
-  # 画图着色用第一个（循环最后一次生效的）
-  df$geneset_color[mask] <- display
 }
 df$geneset[df$geneset == ""] <- "other"
 
