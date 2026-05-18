@@ -36,10 +36,15 @@ DRY_RUN="${DRY_RUN:-0}"
 
 FILE_ID_MAP="${PROJECT_ROOT}/configs/path.file_id_map.tsv"
 BASE_CONFIG="${BATCH_DIR}/config.base.yaml"
+
+# 中间工作文件留在 test/batch 下
 CHUNKS_DIR="${BATCH_DIR}/chunks"
 CONFIGS_DIR="${BATCH_DIR}/configs"
-LOGS_DIR="${BATCH_DIR}/logs"
-STATUS_DIR="${BATCH_DIR}/status"
+
+# 输出统一放在 figure_all 下
+OUTPUT_BASE="/gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all"
+LOGS_DIR="${OUTPUT_BASE}/logs/gwas_manhattan"
+STATUS_DIR="${OUTPUT_BASE}/status/gwas_manhattan"
 
 # ---- Slurm 资源配置 ----
 PARTITION="${PARTITION:-cu,fat,batch01,privority}"
@@ -80,6 +85,13 @@ echo "  共 ${NUM_CHUNKS} 个分块 (Slurm 数组: 0-$((NUM_CHUNKS - 1)))"
 
 # ---- 3. 生成 per-chunk 配置文件 ----
 echo "==> [3/4] 生成 per-chunk 配置文件..."
+
+# 加载 conda 确保 PyYAML 可用
+if [ -f "${CONDA_SH}" ]; then
+    source "${CONDA_SH}"
+    conda activate "${CONTROL_ENV}"
+fi
+
 python3 - "${PROJECT_ROOT}" "${BASE_CONFIG}" "${CHUNKS_DIR}" "${CONFIGS_DIR}" <<'PYEOF'
 import sys, yaml
 from pathlib import Path
@@ -205,9 +217,10 @@ echo ""
 echo "  总 GWAS IDs:  ${TOTAL_IDS}"
 echo "  分块数:       ${NUM_CHUNKS} (每块 ${CHUNK_SIZE} 个)"
 echo "  Slurm 脚本:   ${SBATCH_FILE}"
-echo "  输出目录:     /gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all/gwas_manhattan/"
-echo "  状态目录:     ${STATUS_DIR}/"
-echo "  日志目录:     ${LOGS_DIR}/"
+echo "  输出根目录:   ${OUTPUT_BASE}/"
+echo "    plots/tables: ${OUTPUT_BASE}/gwas_manhattan/"
+echo "    logs:         ${LOGS_DIR}/"
+echo "    status:       ${STATUS_DIR}/"
 echo ""
 
 if [ "${DRY_RUN}" = "1" ]; then

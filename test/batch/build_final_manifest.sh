@@ -1,32 +1,34 @@
 #!/usr/bin/env bash
 # ============================================================================
-# 全部 chunk 完成后，构建最终的合并 manifest
-#
-# 用法:
-#   bash test/batch/build_final_manifest.sh
-#
-# 输出:
-#   /gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all/gwas_manhattan/meta/manifest_all.tsv
+# 全部 chunk 完成后构建最终 manifest + 完整性检查
 # ============================================================================
 
 set -euo pipefail
 
-OUTPUT_DIR="/gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all/gwas_manhattan"
+OUTPUT_BASE="/gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all"
+OUTPUT_DIR="${OUTPUT_BASE}/gwas_manhattan"
 TABLES_DIR="${OUTPUT_DIR}/tables"
 PLOTS_DIR="${OUTPUT_DIR}/plots"
 META_DIR="${OUTPUT_DIR}/meta"
+STATUS_DIR="${OUTPUT_BASE}/status/gwas_manhattan"
 
 echo "============================================"
 echo "  构建最终合并 Manifest"
 echo "============================================"
 
+# 检查状态
+if [ -d "${STATUS_DIR}" ]; then
+    total=$(ls -1 "${STATUS_DIR}"/chunk_*.ok "${STATUS_DIR}"/chunk_*.failed 2>/dev/null | wc -l)
+    ok=$(ls -1 "${STATUS_DIR}"/chunk_*.ok 2>/dev/null | wc -l)
+    failed=$(ls -1 "${STATUS_DIR}"/chunk_*.failed 2>/dev/null | wc -l)
+    echo "  状态: ${ok} 成功 / ${failed} 失败 / ${total} 总"
+fi
+
 if [ ! -d "${TABLES_DIR}" ]; then
     echo "[FAIL] tables 目录不存在: ${TABLES_DIR}"
-    echo "请等待至少一个 chunk 完成后再运行。"
     exit 1
 fi
 
-# 统计输出文件
 TABLE_COUNT=$(ls -1 "${TABLES_DIR}"/*.tsv 2>/dev/null | wc -l)
 PLOT_PDF_COUNT=$(ls -1 "${PLOTS_DIR}"/*.pdf 2>/dev/null | wc -l)
 PLOT_PNG_COUNT=$(ls -1 "${PLOTS_DIR}"/*.png 2>/dev/null | wc -l)
@@ -34,12 +36,11 @@ PLOT_PNG_COUNT=$(ls -1 "${PLOTS_DIR}"/*.png 2>/dev/null | wc -l)
 echo "  Tables (TSV): ${TABLE_COUNT}"
 echo "  Plots  (PDF): ${PLOT_PDF_COUNT}"
 echo "  Plots  (PNG): ${PLOT_PNG_COUNT}"
+echo ""
 
 # 生成 manifest_all.tsv
 MANIFEST_PATH="${META_DIR}/manifest_all.tsv"
 mkdir -p "${META_DIR}"
-
-echo "  生成: ${MANIFEST_PATH}"
 
 {
     printf 'figure_id\tfigure_kind\tsource_id\ttable_path\tplot_pdf\tplot_png\n'
@@ -64,17 +65,7 @@ echo "  生成: ${MANIFEST_PATH}"
     done
 } > "${MANIFEST_PATH}"
 
-echo ""
-echo "============================================"
-echo "  完成!"
-echo "============================================"
-echo "  Manifest:  ${MANIFEST_PATH}"
-echo "  Tables:    ${TABLE_COUNT} 个"
-echo "  PDF:       ${PLOT_PDF_COUNT} 个"
-echo "  PNG:       ${PLOT_PNG_COUNT} 个"
-echo ""
-
-# 统计缺失的 (有 table 但没有 plot 的)
+# 统计缺失
 MISSING_PDF=0
 MISSING_PNG=0
 for table in "${TABLES_DIR}"/*.tsv; do
@@ -84,9 +75,17 @@ for table in "${TABLES_DIR}"/*.tsv; do
     [ -f "${PLOTS_DIR}/${source_id}.png" ] || ((MISSING_PNG++)) || true
 done
 
+echo "============================================"
+echo "  完成"
+echo "============================================"
+echo "  Manifest:  ${MANIFEST_PATH} (${TABLE_COUNT} 条记录)"
+echo "  Tables:    ${TABLE_COUNT}"
+echo "  PDF:       ${PLOT_PDF_COUNT}"
+echo "  PNG:       ${PLOT_PNG_COUNT}"
+
 if [ "${MISSING_PDF}" -gt 0 ] || [ "${MISSING_PNG}" -gt 0 ]; then
-    echo "[WARN] 存在不完整的输出:"
-    echo "  缺少 PDF: ${MISSING_PDF} 个"
-    echo "  缺少 PNG: ${MISSING_PNG} 个"
-    echo "  请用 rerun_failures.sh 重跑失败的 chunk"
+    echo ""
+    echo "  [WARN] 不完整: 缺 ${MISSING_PDF} PDF / ${MISSING_PNG} PNG"
+    echo "  运行 rerun_failures.sh 重跑失败的 chunk"
 fi
+echo "============================================"

@@ -4,7 +4,7 @@
 #
 # 用法:
 #   bash test/batch/rerun_failures.sh
-#   bash test/batch/rerun_failures.sh --dry-run   # 仅列不提交
+#   bash test/batch/rerun_failures.sh --dry-run
 #   bash test/batch/rerun_failures.sh 0001 0005   # 只重跑指定 chunk
 # ============================================================================
 
@@ -13,9 +13,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${PROJECT_ROOT:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 BATCH_DIR="${SCRIPT_DIR}"
-STATUS_DIR="${BATCH_DIR}/status"
 CONFIGS_DIR="${BATCH_DIR}/configs"
-LOGS_DIR="${BATCH_DIR}/logs"
+
+OUTPUT_BASE="/gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all"
+LOGS_DIR="${OUTPUT_BASE}/logs/gwas_manhattan"
+STATUS_DIR="${OUTPUT_BASE}/status/gwas_manhattan"
 
 CONDA_SH="${CONDA_SH:-${HOME}/miniconda3/etc/profile.d/conda.sh}"
 CONTROL_ENV="${CONTROL_ENV:-paper-pipeline-control}"
@@ -26,9 +28,8 @@ MEM="${MEM:-9G}"
 TIME="${TIME:-12:00:00}"
 
 DRY_RUN=0
-
-# 解析参数
 RERUN_IDS=()
+
 for arg in "${@}"; do
     case "${arg}" in
         --dry-run) DRY_RUN=1 ;;
@@ -37,13 +38,10 @@ for arg in "${@}"; do
     esac
 done
 
-# 确定要重跑的 chunk id 列表
 if [ ${#RERUN_IDS[@]} -gt 0 ]; then
-    # 用户指定了具体 chunk
     FAILED_IDS=("${RERUN_IDS[@]}")
     echo "手动指定重跑 ${#FAILED_IDS[@]} 个 chunk: ${FAILED_IDS[*]}"
 else
-    # 从 status 目录找出所有失败的
     FAILED_IDS=()
     if [ -d "${STATUS_DIR}" ]; then
         for fail_file in "${STATUS_DIR}"/chunk_*.failed; do
@@ -76,7 +74,6 @@ for chunk_idx in "${FAILED_IDS[@]}"; do
     # 清除旧状态
     rm -f "${STATUS_DIR}/chunk_${chunk_idx}.ok" "${STATUS_DIR}/chunk_${chunk_idx}.failed"
 
-    # 生成独立 sbatch
     sbatch_script="${RESUBMIT_DIR}/rerun_chunk_${chunk_idx}.sh"
     job_name="gwas_mht_r${chunk_idx}"
 
