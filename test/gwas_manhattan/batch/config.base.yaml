@@ -2,7 +2,7 @@
 # 每个 chunk 的任务脚本会在此基础上追加 gwas_manhattan 段
 
 project_root: ..
-artifact_root: /gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all
+artifact_root: /gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all/outputs
 
 executables:
   plot_rscript:

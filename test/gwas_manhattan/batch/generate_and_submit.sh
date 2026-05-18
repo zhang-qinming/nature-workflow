@@ -6,7 +6,7 @@
 #
 # 用法:
 #   cd /path/to/paper-pipeline
-#   bash test/batch/generate_and_submit.sh
+#   bash test/gwas_manhattan/batch/generate_and_submit.sh
 #
 #   可覆盖的环境变量:
 #     PROJECT_ROOT      项目根目录 (默认: 脚本自动探测)
@@ -37,12 +37,12 @@ DRY_RUN="${DRY_RUN:-0}"
 FILE_ID_MAP="${PROJECT_ROOT}/configs/path.file_id_map.tsv"
 BASE_CONFIG="${BATCH_DIR}/config.base.yaml"
 
-# 中间工作文件留在 test/batch 下
+# 中间工作文件留在 test/gwas_manhattan/batch 下
 CHUNKS_DIR="${BATCH_DIR}/chunks"
 CONFIGS_DIR="${BATCH_DIR}/configs"
 
-# 输出统一放在 figure_all 下
-OUTPUT_BASE="/gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all"
+# 输出统一放在 figure_all/outputs 下
+OUTPUT_BASE="/gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all/outputs"
 LOGS_DIR="${OUTPUT_BASE}/logs/gwas_manhattan"
 STATUS_DIR="${OUTPUT_BASE}/status/gwas_manhattan"
 
@@ -232,8 +232,8 @@ else
     echo ""
     echo "查看状态:"
     echo "  squeue -n ${JOB_NAME}"
-    echo "  bash test/batch/check_status.sh"
+    echo "  bash test/gwas_manhattan/batch/check_status.sh"
     echo ""
     echo "重新提交失败的 chunk:"
-    echo "  bash test/batch/rerun_failures.sh"
+    echo "  bash test/gwas_manhattan/batch/rerun_failures.sh"
 fi

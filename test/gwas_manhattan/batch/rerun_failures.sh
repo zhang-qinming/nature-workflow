@@ -3,9 +3,9 @@
 # 重新提交失败的 GWAS Manhattan chunk
 #
 # 用法:
-#   bash test/batch/rerun_failures.sh
-#   bash test/batch/rerun_failures.sh --dry-run
-#   bash test/batch/rerun_failures.sh 0001 0005   # 只重跑指定 chunk
+#   bash test/gwas_manhattan/batch/rerun_failures.sh
+#   bash test/gwas_manhattan/batch/rerun_failures.sh --dry-run
+#   bash test/gwas_manhattan/batch/rerun_failures.sh 0001 0005   # 只重跑指定 chunk
 # ============================================================================
 
 set -euo pipefail
@@ -15,7 +15,7 @@ PROJECT_ROOT="${PROJECT_ROOT:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 BATCH_DIR="${SCRIPT_DIR}"
 CONFIGS_DIR="${BATCH_DIR}/configs"
 
-OUTPUT_BASE="/gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all"
+OUTPUT_BASE="/gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all/outputs"
 LOGS_DIR="${OUTPUT_BASE}/logs/gwas_manhattan"
 STATUS_DIR="${OUTPUT_BASE}/status/gwas_manhattan"
 

@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-OUTPUT_BASE="/gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all"
+OUTPUT_BASE="/gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all/outputs"
 OUTPUT_DIR="${OUTPUT_BASE}/gwas_manhattan"
 TABLES_DIR="${OUTPUT_DIR}/tables"
 PLOTS_DIR="${OUTPUT_DIR}/plots"

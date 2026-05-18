@@ -6,7 +6,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OUTPUT_BASE="/gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all"
+OUTPUT_BASE="/gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all/outputs"
 STATUS_DIR="${OUTPUT_BASE}/status/gwas_manhattan"
 CHUNKS_DIR="${SCRIPT_DIR}/chunks"
 LOGS_DIR="${OUTPUT_BASE}/logs/gwas_manhattan"
@@ -92,11 +92,11 @@ fi
 echo "============================================"
 if [ "${failed_count}" -gt 0 ]; then
     echo "  有 ${failed_count} 个 chunk 失败。重跑:"
-    echo "    bash test/batch/rerun_failures.sh"
+    echo "    bash test/gwas_manhattan/batch/rerun_failures.sh"
 elif [ "${pending_count}" -gt 0 ]; then
     echo "  还有 ${pending_count} 个 chunk 在等待/运行中..."
 elif [ "${ok_count}" -eq "${total_chunks}" ]; then
     echo "  全部完成! 构建最终 manifest:"
-    echo "    bash test/batch/build_final_manifest.sh"
+    echo "    bash test/gwas_manhattan/batch/build_final_manifest.sh"
 fi
 echo "============================================"
