@@ -1,0 +1,10 @@
+name: paper-pipeline-control
+# 轻量控制环境。
+# 仅用于运行主入口 `paper-pipeline`，负责读取配置并分发任务。
+channels:
+  - conda-forge
+dependencies:
+  - python==3.10.20
+  - pandas==2.3.3
+  - pyyaml==6.0.3
+  - pip==26.0.1

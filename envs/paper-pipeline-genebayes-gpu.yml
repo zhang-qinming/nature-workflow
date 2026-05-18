@@ -1,0 +1,29 @@
+name: paper-pipeline-genebayes-gpu
+# GeneBayes GPU 专用环境。
+# 与 CPU 版相比，这里显式选择 conda-forge 的 CUDA 版 XGBoost。
+# 适用于已经具备 NVIDIA 驱动和可用 GPU 的 Linux 节点。
+channels:
+  - conda-forge
+dependencies:
+  - python==3.10.20
+  - numpy==1.26.4
+  - pandas==2.3.3
+  - scipy==1.15.2
+  - scikit-learn==1.7.2
+  # hyperopt 仍依赖 pkg_resources；setuptools>=81 在部分环境里会导致导入失败。
+  - setuptools==80.10.2
+  # 通过 mutex 强制选择 GPU 变体，再锁定 XGBoost 1.7.6。
+  # 这比在 environment.yml 里写带通配符的 build spec 更稳。
+  - _py-xgboost-mutex==2.0=gpu_0
+  - py-xgboost==1.7.6
+  - xgboost==1.7.6
+  - libxgboost==1.7.6
+  - cuda-version==12.9
+  # 当前仍沿用 conda 侧 ngboost，后续如遇 posterior 训练兼容问题再单独处理。
+  - ngboost==0.3.13.dev0
+  - pip==26.0.1
+  - pip:
+      - hyperopt==0.2.5
+      - shap-hypetune==0.2.7
+      - torch==2.6.0
+      - torchquad==0.5.0

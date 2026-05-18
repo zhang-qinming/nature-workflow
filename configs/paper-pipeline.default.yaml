@@ -1,0 +1,265 @@
+project_root: ..
+artifact_root: ../outputs
+
+executables:
+  genebayes_runner:
+    - conda
+    - run
+    - --no-capture-output
+    - -n
+    - paper-pipeline-genebayes
+  genebayes_cpu_runner:
+    - conda
+    - run
+    - --no-capture-output
+    - -n
+    - paper-pipeline-genebayes
+  genebayes_gpu_runner:
+    - conda
+    - run
+    - --no-capture-output
+    - -n
+    - paper-pipeline-genebayes-gpu
+  perturbseq_runner:
+    - conda
+    - run
+    - --no-capture-output
+    - -n
+    - paper-pipeline-perturbseq
+  rscript:
+    - conda
+    - run
+    - --no-capture-output
+    - -n
+    - paper-pipeline-r
+    - Rscript
+  plot_bash:
+    - conda
+    - run
+    - --no-capture-output
+    - -n
+    - paper-pipeline-plot
+    - bash
+  plot_rscript:
+    - conda
+    - run
+    - --no-capture-output
+    - -n
+    - paper-pipeline-plot
+    - Rscript
+  ldsc_py: ldsc.py
+  liftover: liftOver
+
+workflows:
+  genebayes:
+    traits: [86]
+    trait_prefix: Backman_2021_
+    inputs:
+      s_het: ../data/LoF/GeneBayes_geneFeatures/s_het.tsv
+      reduced_embeddings: ../data/LoF/GeneBayes_geneFeatures/reduced_embeddings.tsv
+      celltype_ntpm: ../data/LoF/GeneBayes_geneFeatures/celltype_nTPM.tsv
+      geneformer_mixture: ../data/LoF/GeneBayes_geneFeatures/GeneFormer_cellclassifier_mixture2.tsv
+      traits_dir: ../data/LoF/raw_burden
+      train_gene_list: ../data/LoF/raw_burden/10086.csv
+      val_gene_list: ../data/LoF/raw_burden/10086.csv
+    parameters:
+      response_file_template: "{trait}.summary_statistics.csv"
+      prefer_gpu: false
+      integration_lb: -3.99
+      integration_ub: 3.99
+      batch_size: 100
+      n_integration_pts: 50000
+      lr: 0.3
+      total_iterations: 1000
+      early_stopping_iter: 10
+      n_trees_per_iteration: 2
+      reg_alpha: 2
+      reg_lambda: 2
+      subsample: 0.8
+      min_child_weight: 3
+      max_depth: 3
+
+  perturbseq:
+    gene_level:
+      inputs:
+        h5ad: ../data/K562_gwps_raw_singlecell_01.h5ad
+        metadata: ../data/Perturbseq/metadata/gwps_metadata.csv
+      parameters:
+        filter_min_genes: 500
+        filter_min_cells: 500
+        chunk_size: 50
+        total_chunks: 198
+        # 调试或并行时可以只跑部分 chunk。
+        # chunk_indices: [1, 2, 3]
+
+    cnmf_essential:
+      cell_types: [K562_essential_raw_singlecell_01]
+      trait_files: [Backman_2021_86.per_gene_estimates.tsv]
+      inputs:
+        h5ad_dir: ../data
+        metadata_dir: ../data/Perturbseq/metadata
+        gene_map: ../data/gencode_v41_gname_gid_ALL_sorted_onlyID
+        shet_path: ../data/shet_10bins.txt
+      parameters:
+        k: 60
+        total_workers: 20
+        # 整体 workflow 默认要求跑完全部 worker；因此这里默认不写 worker_indices。
+        # 如果要把 factorize 分给多个节点，请改用：
+        #   perturbseq-cnmf-essential-factorize
+        # 然后在各自的 config 里显式设置不同的 worker_indices 子集，
+        # 全部 worker 跑完后先执行：
+        #   perturbseq-cnmf-essential-postbase
+        # 最后再执行：
+        #   perturbseq-cnmf-essential-association
+        n_iter: 100
+        seed: 14
+        numgenes: 2000
+        consensus_density_threshold: 0.4
+        mito_column: mitopercent
+        mito_threshold: 0.3
+        min_genes_per_cell: 100
+        min_counts_per_cell: 100
+        min_cells_per_gene: 10
+        random_iterations: 100000
+        top_n_program_genes: 100
+
+    cnmf_genomewide:
+      trait_files: [Backman_2021_86.per_gene_estimates.tsv]
+      inputs:
+        h5ad: ../data/K562_gwps_raw_singlecell_01.h5ad
+        metadata: ../data/Perturbseq/metadata/gwps_metadata.csv
+        gene_map: ../data/gencode_v41_gname_gid_ALL_sorted_onlyID
+        shet_path: ../data/shet_10bins.txt
+      parameters:
+        ks: [30, 60, 90, 120]
+        total_workers: 100
+        # 整体 workflow 默认要求跑完全部 worker；因此这里默认不写 worker_indices。
+        # 如果要把 factorize 分给多个节点，请改用：
+        #   perturbseq-cnmf-genomewide-factorize
+        # 然后在各自的 config 里显式设置不同的 worker_indices 子集，
+        # 全部 worker 跑完后先执行：
+        #   perturbseq-cnmf-genomewide-postbase
+        # 最后再执行：
+        #   perturbseq-cnmf-genomewide-association
+        n_iter: 100
+        seed: 14
+        numgenes: 2000
+        aggregate_name: cNMF_all
+        per_k_name_template: cNMF_K{k}
+        consensus_ks: [60]
+        consensus_density_threshold: 0.5
+        association_k: 60
+        random_iterations: 100000
+        top_n_program_genes: 100
+
+  plot:
+    gene_burden:
+      inputs:
+        raw_burden_dir: ../data/LoF/raw_burden
+        gwas_dir: ../data/GWAS
+        geneset_dir: ../data/geneset  # Put the full offline Hallmark collection here as HALLMARK_*.txt on offline cluster nodes.
+        gene_map: ../data/gencode_v41_gname_gid_ALL_sorted_onlyID
+        trait_correspondence: ../data/Backman_Niele_corresp
+        ld_reference_dir: ../data/GWAS/reference
+      parameters:
+        gwas_traits: [30050]
+        manhattan_gwas_trait: 30050
+        volcano_burden_file: Backman_2021_86_M1_001.summary_statistics.csv
+        lof_enrichment_pairs:
+          - burden_trait: 86
+            gwas_trait: 30050
+            trait_name: MCH
+        cross_trait_traits: [86, 88]
+
+    perturbseq_gene_level:
+      inputs:
+        raw_burden_dir: ../data/LoF/raw_burden
+        gwas_dir: ../data/GWAS
+        gene_map: ../data/gencode_v41_gname_gid_ALL_sorted_onlyID
+        shet_path: ../data/shet_10bins.txt
+        burden_reg_correlation_dir: ../data/Perturbseq/trait_association/K562GW/GeneLevel
+        gene_level_trait_metadata: ../data/Perturbseq/trait_association/K562GW/GeneLevel/Backman_Niele_corresp_all
+      parameters:
+        trait_files: [Backman_2021_86.per_gene_estimates.tsv]
+        enrichment_gwas_trait: 30050
+        enrichment_comp: closest
+        enrichment_target_gene: HBA1
+        enrichment_lof_burden_file: Backman_2021_86_M1_001.summary_statistics.csv
+        render_trait_file: Backman_2021_86.per_gene_estimates.tsv
+
+    perturbseq_cnmf:
+      inputs:
+        gwas_dir: ../data/GWAS
+        gene_map: ../data/gencode_v41_gname_gid_ALL_sorted_onlyID
+        shet_path: ../data/shet_10bins.txt
+        metadata: ../data/Perturbseq/metadata/gwps_metadata.csv
+        trans_eqtl_path: ../data/2018-09-04-trans-eQTLsFDR-CohortInfoRemoved-BonferroniAdded.txt.gz
+      parameters:
+        mode: generic
+        k: 60
+        trait_files: [Backman_2021_86.per_gene_estimates.tsv]
+        # Generic LoF plotting defaults skip the original paper's MCH-specific follow-up analyses.
+        run_multiple_regression: false
+        run_trans_eqtl_follow_up: false
+        posterior_trait_files:
+          MCH: Backman_2021_86.per_gene_estimates.tsv
+          RDW: Backman_2021_88.per_gene_estimates.tsv
+          IRF: Backman_2021_106.per_gene_estimates.tsv
+        plot_label_programs: [4, 16, 25, 40]
+        corregulation_pairs:
+          - program_a: P25
+            program_b: P16
+        trans_eqtl_top_n: 100
+        # Leave unset to auto-detect from SLURM_CPUS_PER_TASK; generated plot configs pin this explicitly.
+        trans_eqtl_parallel_jobs: 8
+        trans_eqtl_gwas_trait: 30050
+        trans_eqtl_gwas_file: 30050_irnt.tsv.gz
+        trans_eqtl_output_label: MCH
+
+    supplementary:
+      inputs:
+        ldsc_dir: ../data/LDSC
+        ldsc_ld_reference_dir: ../data/LDSC/ref/1000G_EUR_Phase3_plink
+        ldsc_baseline_dir: ../data/LDSC/ref/baseline_v1.2
+        ldsc_weights_dir: ../data/LDSC/ref/1000G_Phase3_weights_hm3_no_MHC/weights.hm3_noMHC.
+        ldsc_frq_dir: ../data/LDSC/ref/1000G_Phase3_frq/1000G.EUR.QC.
+        ldsc_sumstats_dir: ../data/LDSC/GWAS
+        chip_dir: ../data/TF_ChIP
+        multicell_cnmf_root: ../data/Perturbseq/cNMF
+        multicell_cnmf_regulation_dir: ../data/Perturbseq/cNMF_regulation
+        multicell_trait_association_dir: ../data/Perturbseq/trait_association
+        gwas_dir: ../data/GWAS
+        growth_screening_csv: ../data/Growth_screening_2014.csv
+        gene_map: ../data/gencode_v41_gname_gid_ALL_sorted_onlyID
+        shet_path: ../data/shet_10bins.txt
+        metadata: ../data/Perturbseq/metadata/gwps_metadata.csv
+        geneset_dir: ../data/geneset
+        liftOver_chain: ../data/hg38ToHg19.over.chain.gz
+      parameters:
+        k: 60
+        ldsc_annotation_beds: []
+        ldsc_sumstats: []  # Leave empty to skip the Figure1 LDSC stage.
+        genetic_correlation_pairs: []  # Optional even when Figure1 LDSC is enabled.
+        run_chip_collection: false
+        growth_screening_programs: [P16]
+        posterior_trait_files:
+          MCH: Backman_2021_86.per_gene_estimates.tsv
+          RDW: Backman_2021_88.per_gene_estimates.tsv
+          IRF: Backman_2021_106.per_gene_estimates.tsv
+        autophagy_geneset_file: Autophagosome_genes.txt
+        figure5_permutation_jobs:
+          - program_n: 5
+            regulator_n: 3
+            program_top_def: 200
+            lof_thresh: 0.1
+            trait: MCH
+        leave_one_out_jobs:
+          - program_n: 5
+            regulator_n: 3
+            program_top_def: 200
+            trait: MCH
+        effect_direction_traits: [MCH, RDW, IRF]
+        effect_direction_program_top_defs: [100, 200]
+        multicell_trait_files:
+          - Backman_2021_133.per_gene_estimates.tsv
+          - Backman_2021_131.per_gene_estimates.tsv

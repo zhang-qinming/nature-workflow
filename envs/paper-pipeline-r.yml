@@ -1,0 +1,13 @@
+name: paper-pipeline-r
+# R 执行环境。
+# 用于 Perturbseq gene-level 的 limma 输入准备、limma 建模、结果汇总，以及 cNMF 汇总等 R 脚本步骤。
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - r-base==4.5.3
+  - r-data.table==1.17.8
+  - r-dplyr==1.2.0
+  - r-ksamples==1.2_12
+  - bioconductor-limma==3.66.0
+  - bioconductor-edger==4.8.2

@@ -1,0 +1,23 @@
+name: paper-pipeline-genebayes
+# GeneBayes 专用环境。
+# 用于特征预测、特征合并和 posterior 训练。
+# 默认给出 CPU 基线环境；若需要 GPU，请在建环境后按机器 CUDA 版本重装 torch。
+channels:
+  - conda-forge
+dependencies:
+  - python==3.10.20
+  - numpy==1.26.4
+  - pandas==2.3.3
+  - scipy==1.15.2
+  - scikit-learn==1.7.2
+  # hyperopt 仍依赖 pkg_resources；setuptools>=81 在部分环境里会导致导入失败。
+  - setuptools==80.10.2
+  - xgboost==1.7.6
+  # 优先使用 conda 的 ngboost，避免集群上直接走 pip/git 安装失败。
+  - ngboost==0.3.13.dev0
+  - pip==26.0.1
+  - pip:
+      - hyperopt==0.2.5
+      - shap-hypetune==0.2.7
+      - torch==2.6.0
+      - torchquad==0.5.0

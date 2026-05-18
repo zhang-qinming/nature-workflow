@@ -1,0 +1,70 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "paper-pipeline"
+version = "0.1.0"
+description = "Config-driven workflow entrypoints and orchestration for the paper pipeline"
+# The packaged codebase uses Python 3.10 union syntax (e.g. Path | None),
+# so we cannot expose the upstream GeneBayes Python 3.9 floor here without
+# first backporting those annotations.
+requires-python = ">=3.10"
+dependencies = [
+  "pandas==2.3.3",
+  "PyYAML==6.0.3",
+]
+
+[project.optional-dependencies]
+genebayes = [
+  "numpy==1.26.4",
+  "scipy==1.15.2",
+  "scikit-learn==1.7.2",
+  "hyperopt==0.2.5",
+  "shap-hypetune==0.2.7",
+  # GeneBayes upstream recommends XGBoost 1.7.6.
+  "xgboost==1.7.6",
+  # NGBoost is required by the training module.
+  "ngboost>=0.3",
+  # Install a CUDA-enabled torch build separately when GPU execution is needed.
+  "torch==2.6.0",
+  "torchquad==0.5.0",
+]
+perturbseq = [
+  "cnmf==1.7.0",
+  "scanpy==1.11.5",
+]
+all = [
+  "numpy==1.26.4",
+  "scipy==1.15.2",
+  "scikit-learn==1.7.2",
+  "hyperopt==0.2.5",
+  "shap-hypetune==0.2.7",
+  "xgboost==1.7.6",
+  "ngboost>=0.3",
+  "torch==2.6.0",
+  "torchquad==0.5.0",
+  "cnmf==1.7.0",
+  "scanpy==1.11.5",
+]
+
+[project.scripts]
+paper-pipeline = "paper_pipeline.cli:main"
+paper-pipeline-genebayes-signed = "paper_pipeline.dataprep.genebayes.feature_prediction:main_signed"
+paper-pipeline-genebayes-magnitude = "paper_pipeline.dataprep.genebayes.feature_prediction:main_magnitude"
+paper-pipeline-genebayes-merge = "paper_pipeline.dataprep.genebayes.merge:main"
+paper-pipeline-genebayes-train = "paper_pipeline.dataprep.genebayes.training:main"
+paper-pipeline-perturbseq-filter-cnmf-cells = "paper_pipeline.dataprep.perturbseq.cnmf:main_filter_cells"
+paper-pipeline-perturbseq-merge-cnmf-tmp = "paper_pipeline.dataprep.perturbseq.cnmf:main_merge_tmp"
+paper-pipeline-perturbseq-extract-counts = "paper_pipeline.dataprep.perturbseq.gene_level:main_extract_counts"
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"paper_pipeline.dataprep.perturbseq" = ["r_scripts/*.R"]
+"paper_pipeline.figures" = ["scripts/*.R"]
+"paper_pipeline.plot" = ["scripts/**/*.R", "scripts/**/*.sh"]

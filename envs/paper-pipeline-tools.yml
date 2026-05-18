@@ -1,0 +1,23 @@
+name: paper-pipeline-tools
+channels:
+  - bioconda
+dependencies:
+  - python==2.7.15
+  - bitarray==0.8.3
+  - nose==1.3.7
+  - pybedtools==0.7.10
+  - ucsc-liftover==469
+  - pip==20.1.1
+  - pip:
+      - scipy==0.18.0
+      - pandas==0.20.0
+      - numpy==1.16.0
+
+# Notes:
+# - This environment is intentionally aligned with the legacy bulik/ldsc stack used by
+#   the original LDSC repository: https://github.com/bulik/ldsc
+# - `generate_plot_batch_scripts.sh` expects a local checkout of that repository and
+#   writes `ldsc_py_wrapper.sh` to execute:
+#     python <LDSC_REPO_DIR>/ldsc.py
+#   inside this environment.
+# - Set `LDSC_REPO_DIR=/abs/path/to/bulik/ldsc` before generating plot scripts.

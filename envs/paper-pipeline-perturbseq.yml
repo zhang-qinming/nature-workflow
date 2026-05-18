@@ -1,0 +1,14 @@
+name: paper-pipeline-perturbseq
+# Perturbseq Python 环境。
+# 用于 scanpy 的 h5ad 读取/过滤，以及 cNMF 相关的 Python 步骤。
+# gene-level 的 limma 输入准备和汇总已经回到 paper-pipeline-r 环境执行。
+channels:
+  - conda-forge
+dependencies:
+  - python==3.10.20
+  - pandas==2.3.3
+  - pyyaml==6.0.3
+  - scanpy==1.11.5
+  - pip==26.0.1
+  - pip:
+      - cnmf==1.7.0
