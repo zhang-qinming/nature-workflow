@@ -21,7 +21,7 @@ MAX_PENDING="${MAX_PENDING:-100}"
 
 if [ ! -f "${MANIFEST_PATH}" ]; then
     echo "Manifest not found: ${MANIFEST_PATH}" >&2
-    echo "Run: bash test/gwas_manhattan/generate.sh" >&2
+    echo "Run: bash test/gwas_manhattan/1_generate.sh" >&2
     exit 1
 fi
 

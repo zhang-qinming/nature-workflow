@@ -88,4 +88,4 @@ EOF
 echo "Generated ${#ALL_IDS[@]} sbatch scripts under: ${GENERATED_DIR}"
 echo "Manifest: ${MANIFEST_PATH}"
 echo "Job name: ${JOB_NAME}"
-echo "Next: bash test/gwas_manhattan/submit.sh"
+echo "Next: bash test/gwas_manhattan/2_submit.sh"

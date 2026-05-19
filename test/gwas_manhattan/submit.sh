@@ -28,7 +28,7 @@ mkdir -p "${STATUS_DIR}" "${LOGS_DIR}" "${FAILURE_DIR}"
 
 if [ ! -f "${MANIFEST_PATH}" ]; then
     echo "Manifest not found: ${MANIFEST_PATH}" >&2
-    echo "Run: bash test/gwas_manhattan/generate.sh" >&2
+    echo "Run: bash test/gwas_manhattan/1_generate.sh" >&2
     exit 1
 fi
 
@@ -98,4 +98,4 @@ echo "Job name: ${JOB_NAME}"
 echo "Submitted: ${SUBMITTED}"
 echo "Skipped: ${SKIPPED}"
 echo "Submit failed: ${FAILED_SUBMIT}"
-echo "Check: bash test/gwas_manhattan/check.sh"
+echo "Check: bash test/gwas_manhattan/3_check.sh"
