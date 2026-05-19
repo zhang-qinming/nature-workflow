@@ -18,6 +18,8 @@ MANIFEST_PATH="${MANIFEST_PATH:-${BATCH_ROOT}/manifest.tsv}"
 
 DRY_RUN="${DRY_RUN:-0}"
 MAX_PENDING="${MAX_PENDING:-100}"
+RERUN_MEM="${RERUN_MEM:-32G}"
+RERUN_CPUS="${RERUN_CPUS:-2}"
 
 if [ ! -f "${MANIFEST_PATH}" ]; then
     echo "Manifest not found: ${MANIFEST_PATH}" >&2
@@ -70,13 +72,13 @@ for gwas_id in "${FAILED_IDS[@]}"; do
     done
 
     if [ "${DRY_RUN}" = "1" ]; then
-        echo "[DRY RUN] sbatch ${script_path}"
+        echo "[DRY RUN] sbatch --mem=${RERUN_MEM} --cpus-per-task=${RERUN_CPUS} ${script_path}"
         ((SUBMITTED++)) || true
         continue
     fi
 
     submit_output=""
-    if submit_output="$(sbatch --parsable "${script_path}" 2>&1)"; then
+    if submit_output="$(sbatch --parsable --mem="${RERUN_MEM}" --cpus-per-task="${RERUN_CPUS}" "${script_path}" 2>&1)"; then
         echo "${submit_output}" > "${STATUS_DIR}/${gwas_id}.running"
         echo "[OK] ${gwas_id} -> Job ${submit_output}"
         ((SUBMITTED++)) || true
