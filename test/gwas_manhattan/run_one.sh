@@ -81,7 +81,7 @@ config["project_root"] = str(proj_root)
 config["artifact_root"] = str(output_root)
 
 shared = config.get("workflows", {}).get("figures", {}).get("shared_inputs", {})
-for key in ("file_id_map", "gene_map", "gene_annotation", "geneset_dir"):
+for key in ("file_id_map", "gene_map", "gene_annotation", "geneset_dir", "spectra_path"):
     value = shared.get(key)
     if value and isinstance(value, str) and not value.startswith("/"):
         shared[key] = str((base_path.parent / value).resolve())

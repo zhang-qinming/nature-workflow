@@ -51,6 +51,60 @@ read_gene_map <- function(gene_map_path) {
   gene_map
 }
 
+read_program_membership_lookup <- function(spectra_path, gene_map_path, k = 60, top_n = 100) {
+  spectra_raw <- data.table::fread(spectra_path, data.table = FALSE)
+  if (ncol(spectra_raw) < 1) {
+    stop(sprintf("cNMF spectra at %s is empty", spectra_path))
+  }
+
+  if (is.character(spectra_raw[[1]])) {
+    row.names(spectra_raw) <- spectra_raw[[1]]
+    spectra_raw <- spectra_raw[, -1, drop = FALSE]
+  }
+  spectra_mat <- t(as.matrix(spectra_raw))
+  if (ncol(spectra_mat) == 0) {
+    return(character())
+  }
+
+  program_count <- min(as.integer(k), ncol(spectra_mat))
+  colnames(spectra_mat) <- paste0("P", seq_len(ncol(spectra_mat)))
+
+  gene_map <- read_gene_map(gene_map_path)
+  gene_lookup <- stats::setNames(gene_map$gene, gene_map$ensg)
+  gene_symbols <- unname(gene_lookup[row.names(spectra_mat)])
+  missing_gene <- is.na(gene_symbols) | !nzchar(gene_symbols)
+  gene_symbols[missing_gene] <- row.names(spectra_mat)[missing_gene]
+
+  membership <- list()
+  for (program_index in seq_len(program_count)) {
+    program_name <- paste0("P", program_index)
+    program_df <- data.frame(
+      gene = gene_symbols,
+      weight = as.numeric(spectra_mat[, program_index]),
+      stringsAsFactors = FALSE
+    )
+    program_df <- program_df[order(program_df$weight, decreasing = TRUE, na.last = NA), , drop = FALSE]
+    program_df <- program_df[nzchar(program_df$gene) & !duplicated(program_df$gene), , drop = FALSE]
+    if (nrow(program_df) == 0) {
+      next
+    }
+
+    top_genes <- head(program_df$gene, as.integer(top_n))
+    for (gene in top_genes) {
+      membership[[gene]] <- c(membership[[gene]], program_name)
+    }
+  }
+
+  if (length(membership) == 0) {
+    return(character())
+  }
+
+  stats::setNames(
+    vapply(membership, function(values) paste(unique(values), collapse = ";"), character(1)),
+    names(membership)
+  )
+}
+
 label_from_ensg <- function(ensg, gene_map_path) {
   gene_map <- read_gene_map(gene_map_path)
   lookup <- stats::setNames(gene_map$gene, gene_map$ensg)
@@ -85,6 +139,7 @@ parse_variant_table <- function(gwas) {
   if ("low_confidence_variant" %in% nms) {
     gwas_f <- gwas_f[gwas_f$low_confidence_variant == FALSE, , drop = FALSE]
   }
+  snp <- if (!is.null(variant_col)) as.character(gwas_f[[variant_col]]) else rep(NA_character_, nrow(gwas_f))
 
   # parse chromosome and position
   if (!is.null(variant_col) && grepl(":", as.character(gwas_f[[variant_col]][1]))) {
@@ -107,10 +162,14 @@ parse_variant_table <- function(gwas) {
 
   # strip leading zeros from chromosome (e.g. "01" → "1")
   chrom <- sub("^0+", "", chrom)
+  fallback_snp <- paste0(chrom, ":", format(pos, scientific = FALSE, trim = TRUE))
+  missing_snp <- is.na(snp) | !nzchar(snp)
+  snp[missing_snp] <- fallback_snp[missing_snp]
 
   df <- data.frame(
     CHROM = chrom,
     POS = pos,
+    SNP = snp,
     P = as.numeric(gwas_f[[pval_col]]),
     stringsAsFactors = FALSE
   )

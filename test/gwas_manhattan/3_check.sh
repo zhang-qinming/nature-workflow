@@ -53,7 +53,7 @@ for source_id in "${ALL_IDS[@]}"; do
     fi
 
     [ -f "${OUTPUT_DIR}/plots/${source_id}.pdf" ] && ((pdf++)) || true
-    [ -f "${OUTPUT_DIR}/tables/${source_id}.tsv" ] && ((table_main++)) || true
+    [ -f "${OUTPUT_DIR}/tables/${source_id}_variants.tsv" ] && ((table_main++)) || true
     [ -f "${OUTPUT_DIR}/tables/${source_id}_hits.tsv" ] && ((table_hits++)) || true
 done
 
@@ -81,8 +81,8 @@ echo "PD queue:  ${pd_count}"
 echo "R queue:   ${r_count}"
 echo ""
 echo "PDF:       ${pdf}"
-echo "Main TSV:  ${table_main}"
-echo "Hits TSV:  ${table_hits}"
+echo "Variants TSV: ${table_main}"
+echo "Hits TSV:     ${table_hits}"
 
 if [ "${failed}" -gt 0 ]; then
     echo ""

@@ -23,9 +23,9 @@ mkdir -p "${META_DIR}"
 mapfile -t ALL_IDS < <(awk -F '\t' 'NR > 1 { sub(/\r$/, "", $1); print $1 }' "${FILE_ID_MAP}")
 
 {
-    printf 'figure_id\tfigure_kind\tsource_id\ttable_path\thits_path\tplot_pdf\tplot_png\tstatus\n'
+    printf 'figure_id\tfigure_kind\tsource_id\ttable_path\tvariants_path\thits_path\tplot_pdf\tplot_png\tstatus\n'
     for source_id in "${ALL_IDS[@]}"; do
-        table_path="${TABLES_DIR}/${source_id}.tsv"
+        variants_path="${TABLES_DIR}/${source_id}_variants.tsv"
         hits_path="${TABLES_DIR}/${source_id}_hits.tsv"
         plot_pdf="${PLOTS_DIR}/${source_id}.pdf"
         plot_png="${PLOTS_DIR}/${source_id}.png"
@@ -33,11 +33,12 @@ mapfile -t ALL_IDS < <(awk -F '\t' 'NR > 1 { sub(/\r$/, "", $1); print $1 }' "${
         [ -f "${STATUS_DIR}/${source_id}.ok" ] && status="ok"
         [ -f "${STATUS_DIR}/${source_id}.running" ] && status="running"
         [ -f "${STATUS_DIR}/${source_id}.failed" ] && status="failed"
-        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
             "${source_id}" \
             "gwas_manhattan" \
             "${source_id}" \
-            "${table_path}" \
+            "${variants_path}" \
+            "${variants_path}" \
             "${hits_path}" \
             "${plot_pdf}" \
             "${plot_png}" \

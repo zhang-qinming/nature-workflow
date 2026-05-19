@@ -89,6 +89,8 @@ class ResolvedFiguresGwasManhattan:
     config: LoadedConfig
     gene_annotation: Path
     geneset_dir: Path
+    gene_map: Path
+    spectra_path: Path
     output_dir: Path
     targets: tuple[FileTarget, ...]
     highlight_genesets: tuple[str, ...]
@@ -96,6 +98,8 @@ class ResolvedFiguresGwasManhattan:
     flank_bp: int
     label_p_threshold: float
     genomewide_threshold: float
+    k: int
+    top_n_program_genes: int
 
 
 @dataclass(frozen=True)
@@ -657,11 +661,22 @@ def _resolve_figures_gwas_manhattan(config: LoadedConfig) -> ResolvedFiguresGwas
         parameters.get("data_genesets"),
         "workflows.figures.gwas_manhattan.parameters.data_genesets",
     ) or highlight_genesets
+    k = int(parameters.get("k", 60))
 
     return ResolvedFiguresGwasManhattan(
         config=config,
         gene_annotation=config.resolve_path(inputs.get("gene_annotation")) or gwas_dir / "genes.protein_coding.v39.gtf",
         geneset_dir=config.resolve_path(inputs.get("geneset_dir")) or config.project_root / "data" / "geneset",
+        gene_map=config.resolve_path(inputs.get("gene_map")) or config.project_root / "data" / "gencode_v41_gname_gid_ALL_sorted_onlyID",
+        spectra_path=config.resolve_path(inputs.get("spectra_path"))
+        or config.resolve_path_or_artifact(
+            inputs.get("spectra_path"),
+            "perturbseq",
+            "cnmf_genomewide",
+            "cNMF",
+            "cNMF_all",
+            f"cNMF_all.gene_spectra_score.k_{k}.dt_0_5.txt",
+        ),
         output_dir=config.resolve_path_or_artifact(outputs.get("output_dir"), "gwas_manhattan"),
         targets=targets,
         highlight_genesets=highlight_genesets,
@@ -669,6 +684,8 @@ def _resolve_figures_gwas_manhattan(config: LoadedConfig) -> ResolvedFiguresGwas
         flank_bp=int(parameters.get("flank_bp", 50000)),
         label_p_threshold=float(parameters.get("label_p_threshold", 1e-30)),
         genomewide_threshold=float(parameters.get("genomewide_threshold", 5e-8)),
+        k=k,
+        top_n_program_genes=int(parameters.get("top_n_program_genes", 100)),
     )
 
 
@@ -1374,7 +1391,8 @@ def build_figures_gwas_manhattan_tasks(config: LoadedConfig) -> list[Task]:
     manifest_rows: list[dict[str, str]] = []
 
     for target in resolved.targets:
-        table_path = tables_dir / f"{target.source_id}.tsv"
+        variants_path = tables_dir / f"{target.source_id}_variants.tsv"
+        hits_path = tables_dir / f"{target.source_id}_hits.tsv"
         plot_prefix = plots_dir / target.source_id
         command = _rscript_command(
             config,
@@ -1383,12 +1401,16 @@ def build_figures_gwas_manhattan_tasks(config: LoadedConfig) -> list[Task]:
             resolved.gene_annotation,
             resolved.geneset_dir,
             geneset_arg,
-            table_path,
+            variants_path,
             plot_prefix,
             resolved.flank_bp,
             resolved.label_p_threshold,
             resolved.genomewide_threshold,
             data_geneset_arg,
+            resolved.spectra_path,
+            resolved.gene_map,
+            resolved.k,
+            resolved.top_n_program_genes,
         )
         tasks.append(
             Task(
@@ -1403,7 +1425,9 @@ def build_figures_gwas_manhattan_tasks(config: LoadedConfig) -> list[Task]:
                 "figure_kind": "gwas_manhattan",
                 "source_id": target.source_id,
                 "source_path": str(target.source_path),
-                "table_path": str(table_path),
+                "table_path": str(variants_path),
+                "variants_path": str(variants_path),
+                "hits_path": str(hits_path),
                 "plot_pdf": str(plot_prefix.with_suffix(".pdf")),
                 "plot_png": str(plot_prefix.with_suffix(".png")),
             }

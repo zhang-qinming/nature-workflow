@@ -150,6 +150,7 @@ FIGURE_QQ_Y_LIMIT="${FIGURE_QQ_Y_LIMIT:-10}"
 FIGURE_GWAS_FLANK_BP="${FIGURE_GWAS_FLANK_BP:-50000}"
 FIGURE_GWAS_LABEL_P_THRESHOLD="${FIGURE_GWAS_LABEL_P_THRESHOLD:-1e-30}"
 FIGURE_GWAS_GENOMEWIDE_THRESHOLD="${FIGURE_GWAS_GENOMEWIDE_THRESHOLD:-5e-8}"
+FIGURE_GWAS_TOP_N_PROGRAM_GENES="${FIGURE_GWAS_TOP_N_PROGRAM_GENES:-100}"
 FIGURE_LOCUS_FLANK_BP="${FIGURE_LOCUS_FLANK_BP:-250000}"
 FIGURE_LOCUS_LABEL_TOP_N="${FIGURE_LOCUS_LABEL_TOP_N:-6}"
 FIGURE_CROSS_TRAIT_TOP_N="${FIGURE_CROSS_TRAIT_TOP_N:-12}"
@@ -514,6 +515,7 @@ workflows:
       gene_map: $(yaml_quote "${FIGURE_GENE_MAP}")
       geneset_dir: $(yaml_quote "${FIGURE_GENESET_DIR}")
       gene_annotation: $(yaml_quote "${FIGURE_GENE_ANNOTATION}")
+      spectra_path: $(yaml_quote "${FIGURE_SPECTRA_PATH}")
       posterior_dir: $(yaml_quote "${FIGURE_POSTERIOR_DIR}")
 EOF
     if [[ -n "${FIGURE_POSTERIOR_NAME_MAP}" ]]; then
@@ -615,6 +617,8 @@ append_gwas_manhattan_section() {
         flank_bp: ${FIGURE_GWAS_FLANK_BP}
         label_p_threshold: ${FIGURE_GWAS_LABEL_P_THRESHOLD}
         genomewide_threshold: ${FIGURE_GWAS_GENOMEWIDE_THRESHOLD}
+        k: ${FIGURE_CNMF_K}
+        top_n_program_genes: ${FIGURE_GWAS_TOP_N_PROGRAM_GENES}
         highlight_genesets:
 ${GENESETS_YAML}
 YAML_EOF

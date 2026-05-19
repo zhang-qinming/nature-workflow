@@ -4,12 +4,16 @@ gwas_path <- as.character(args[1])
 gene_annotation_path <- as.character(args[2])
 geneset_dir <- as.character(args[3])
 highlight_genesets_raw <- if (length(args) >= 4) as.character(args[4]) else ""
-table_path <- as.character(args[5])
+variants_path <- as.character(args[5])
 plot_prefix <- as.character(args[6])
 flank_bp <- if (length(args) >= 7) as.numeric(args[7]) else 50000
 label_p_threshold <- if (length(args) >= 8) as.numeric(args[8]) else 1e-30
 genomewide_threshold <- if (length(args) >= 9) as.numeric(args[9]) else 5e-8
 data_genesets_raw <- if (length(args) >= 10 && nzchar(args[10])) as.character(args[10]) else ""
+spectra_path <- if (length(args) >= 11 && nzchar(args[11])) as.character(args[11]) else ""
+gene_map_path <- if (length(args) >= 12 && nzchar(args[12])) as.character(args[12]) else ""
+program_k <- if (length(args) >= 13) as.numeric(args[13]) else 60
+top_n_program_genes <- if (length(args) >= 14) as.numeric(args[14]) else 100
 
 script_path_arg <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
 script_dir <- if (length(script_path_arg) > 0) {
@@ -19,8 +23,86 @@ script_dir <- if (length(script_path_arg) > 0) {
 }
 source(file.path(script_dir, "helpers.R"))
 
-highlight_genesets <- trimws(strsplit(highlight_genesets_raw, ",", fixed = TRUE)[[1]])
-highlight_genesets <- highlight_genesets[nzchar(highlight_genesets)]
+parse_name_list <- function(raw) {
+  if (is.null(raw) || !nzchar(raw)) {
+    return(character())
+  }
+  values <- trimws(strsplit(raw, ",", fixed = TRUE)[[1]])
+  values[nzchar(values)]
+}
+
+dedupe_delimited_values <- function(values, sep = ";") {
+  vapply(
+    values,
+    function(value) {
+      if (is.na(value) || !nzchar(value)) {
+        return("")
+      }
+      parts <- trimws(strsplit(value, sep, fixed = TRUE)[[1]])
+      parts <- parts[nzchar(parts)]
+      if (length(parts) == 0) {
+        return("")
+      }
+      paste(unique(parts), collapse = sep)
+    },
+    character(1)
+  )
+}
+
+build_region_table <- function(annotation_df, geneset_names, geneset_dir, flank_bp) {
+  region_rows <- list()
+  for (geneset_name in geneset_names) {
+    genes <- read_geneset_members(geneset_dir, geneset_name)
+    gene_rows <- annotation_df[annotation_df$gene %in% genes, c("gene", "chr_norm", "start", "end"), drop = FALSE]
+    if (nrow(gene_rows) == 0) {
+      next
+    }
+
+    gene_rows <- gene_rows[!duplicated(gene_rows$gene), , drop = FALSE]
+    gene_rows$region_start <- pmax(1, gene_rows$start - flank_bp)
+    gene_rows$region_end <- gene_rows$end + flank_bp
+    gene_rows$geneset_name <- geneset_name
+    gene_rows$display_name <- friendly_geneset_name(geneset_name)
+    region_rows[[length(region_rows) + 1]] <- gene_rows
+  }
+
+  if (length(region_rows) == 0) {
+    return(NULL)
+  }
+  do.call(rbind, region_rows)
+}
+
+annotate_nearest_genes <- function(chrom_vec, pos_vec, genes_by_chr) {
+  nearest_gene <- rep("", length(chrom_vec))
+  distance_to_gene <- rep(NA_real_, length(chrom_vec))
+
+  for (index in seq_along(chrom_vec)) {
+    chr_key <- as.character(chrom_vec[index])
+    chr_genes <- genes_by_chr[[chr_key]]
+    if (is.null(chr_genes) || nrow(chr_genes) == 0) {
+      next
+    }
+
+    pos_value <- as.numeric(pos_vec[index])
+    distances <- ifelse(
+      pos_value < chr_genes$start,
+      chr_genes$start - pos_value,
+      ifelse(pos_value > chr_genes$end, pos_value - chr_genes$end, 0)
+    )
+    nearest_index <- which.min(distances)
+    nearest_gene[index] <- chr_genes$gene[nearest_index]
+    distance_to_gene[index] <- distances[nearest_index]
+  }
+
+  data.frame(
+    nearest_gene = nearest_gene,
+    distance_to_gene = distance_to_gene,
+    stringsAsFactors = FALSE
+  )
+}
+
+highlight_genesets <- parse_name_list(highlight_genesets_raw)
+data_genesets <- parse_name_list(data_genesets_raw)
 
 gwas <- data.table::fread(gwas_path, data.table = FALSE)
 gwas_df <- parse_variant_table(gwas)
@@ -29,152 +111,164 @@ gwas_df <- coord_data$data
 axis_df <- coord_data$axis
 
 gene_annotation <- read_gene_annotation_table(gene_annotation_path)
+gene_annotation$chr_norm <- sub("^chr", "", as.character(gene_annotation$chr))
+gene_annotation <- gene_annotation[
+  gene_annotation$chr_norm %in% as.character(seq_len(22)),
+  c("gene", "chr_norm", "start", "end"),
+  drop = FALSE
+]
+gene_annotation <- gene_annotation[order(as.numeric(gene_annotation$chr_norm), gene_annotation$start, gene_annotation$end), , drop = FALSE]
+genes_by_chr <- split(gene_annotation, gene_annotation$chr_norm)
 
-# ── 画图着色用的基因集区间表（highlight_genesets, 默认4个） ──
-region_rows <- list()
-for (geneset_name in highlight_genesets) {
-  genes <- read_geneset_members(geneset_dir, geneset_name)
-  gene_rows <- gene_annotation[gene_annotation$gene %in% genes, c("gene", "chr", "start", "end")]
-  if (nrow(gene_rows) == 0) next
-  gene_rows$chr <- sub("^chr", "", as.character(gene_rows$chr))
-  gene_rows$region_start <- gene_rows$start - flank_bp
-  gene_rows$region_end   <- gene_rows$end   + flank_bp
-  gene_rows$geneset_name <- geneset_name
-  gene_rows$display_name <- friendly_geneset_name(geneset_name)
-  region_rows[[length(region_rows) + 1]] <- gene_rows
-}
-region_df <- do.call(rbind, region_rows)
-has_genesets <- !is.null(region_df) && nrow(region_df) > 0
-
-# ── 数据导出的全量基因集区间表（data_genesets, 全部54个） ──
-data_genesets <- if (nzchar(data_genesets_raw)) {
-  sets <- trimws(strsplit(data_genesets_raw, ",", fixed = TRUE)[[1]])
-  sets[nzchar(sets)]
+program_lookup <- character()
+if (nzchar(spectra_path) && nzchar(gene_map_path) && file.exists(spectra_path) && file.exists(gene_map_path)) {
+  program_lookup <- read_program_membership_lookup(
+    spectra_path = spectra_path,
+    gene_map_path = gene_map_path,
+    k = as.integer(program_k),
+    top_n = as.integer(top_n_program_genes)
+  )
 } else {
-  character()
+  message("Program membership annotation disabled: spectra_path or gene_map_path is unavailable.")
 }
-data_region_rows <- list()
-for (geneset_name in data_genesets) {
-  genes <- read_geneset_members(geneset_dir, geneset_name)
-  gene_rows <- gene_annotation[gene_annotation$gene %in% genes, c("gene", "chr", "start", "end")]
-  if (nrow(gene_rows) == 0) next
-  gene_rows$chr <- sub("^chr", "", as.character(gene_rows$chr))
-  gene_rows$region_start <- gene_rows$start - flank_bp
-  gene_rows$region_end   <- gene_rows$end   + flank_bp
-  gene_rows$geneset_name <- geneset_name
-  gene_rows$display_name <- friendly_geneset_name(geneset_name)
-  data_region_rows[[length(data_region_rows) + 1]] <- gene_rows
-}
-data_region_df <- do.call(rbind, data_region_rows)
+
+region_df <- build_region_table(gene_annotation, highlight_genesets, geneset_dir, flank_bp)
+data_region_df <- build_region_table(gene_annotation, data_genesets, geneset_dir, flank_bp)
+has_genesets <- !is.null(region_df) && nrow(region_df) > 0
 has_data_genesets <- !is.null(data_region_df) && nrow(data_region_df) > 0
 
-# ── 着色（用 highlight_genesets） ──
-gwas_df$geneset       <- ""
+gwas_df$geneset <- ""
 gwas_df$geneset_color <- "background"
-label_candidates <- data.frame()
 
 if (has_genesets) {
-  all_chroms <- unique(gwas_df$CHROM)
+  for (chr_value in unique(gwas_df$CHROM)) {
+    chr_mask <- gwas_df$CHROM == chr_value
+    chr_regions <- region_df[region_df$chr_norm == chr_value, , drop = FALSE]
+    if (nrow(chr_regions) == 0) {
+      next
+    }
 
-  for (chr in all_chroms) {
-    chr_mask <- gwas_df$CHROM == chr
-    chr_regions <- region_df[region_df$chr == chr, , drop = FALSE]
-    if (nrow(chr_regions) == 0) next
-
-    chr_regions <- chr_regions[nrow(chr_regions):1, ]
+    chr_regions <- chr_regions[nrow(chr_regions):1, , drop = FALSE]
     chr_pos <- gwas_df$POS[chr_mask]
     chr_geneset_color <- rep("background", sum(chr_mask))
-
-    for (j in seq_len(nrow(chr_regions))) {
-      in_region <- chr_pos >= chr_regions$region_start[j] &
-                   chr_pos <= chr_regions$region_end[j]
-      chr_geneset_color[in_region] <- chr_regions$display_name[j]
+    for (index in seq_len(nrow(chr_regions))) {
+      in_region <- chr_pos >= chr_regions$region_start[index] & chr_pos <= chr_regions$region_end[index]
+      chr_geneset_color[in_region] <- chr_regions$display_name[index]
     }
     gwas_df$geneset_color[chr_mask] <- chr_geneset_color
-
-    # 收集可标注位点
-    sig_chr_mask <- chr_mask & gwas_df$P <= label_p_threshold & gwas_df$geneset_color != "background"
-    if (any(sig_chr_mask)) {
-      sub <- gwas_df[sig_chr_mask, c("CHROM", "POS", "P", "COORD", "geneset_color"), drop = FALSE]
-      sub$neg_log10_p <- -log10(pmax(sub$P, .Machine$double.xmin))
-      label_candidates <- rbind(label_candidates, sub)
-    }
-
-    # 收集可标注位点（需要 neg_log10_p 给 ggplot 用，提前算）
-    sig_chr_mask <- chr_mask & gwas_df$P <= label_p_threshold & gwas_df$geneset != ""
-    if (any(sig_chr_mask)) {
-      sub <- gwas_df[sig_chr_mask, c("CHROM", "POS", "P", "COORD", "geneset", "geneset_color"), drop = FALSE]
-      sub$neg_log10_p <- -log10(pmax(sub$P, .Machine$double.xmin))
-      label_candidates <- rbind(label_candidates, sub)
-    }
   }
-
-  # 给显著位点标注最近基因名
-  if (nrow(label_candidates) > 0) {
-    label_candidates$LABEL <- ""
-    for (j in seq_len(nrow(label_candidates))) {
-      chr_j    <- label_candidates$CHROM[j]
-      pos_j    <- label_candidates$POS[j]
-      color_j  <- label_candidates$geneset_color[j]
-
-      geneset_orig <- region_df$display_name == color_j & region_df$chr == chr_j
-      nearby <- region_df[geneset_orig &
-                          pos_j >= region_df$region_start &
-                          pos_j <= region_df$region_end, , drop = FALSE]
-      if (nrow(nearby) > 0) {
-        label_candidates$LABEL[j] <- nearby$gene[1]
-      }
-    }
-    label_candidates <- label_candidates[label_candidates$LABEL != "", , drop = FALSE]
-    label_candidates <- label_candidates[!duplicated(label_candidates$COORD), , drop = FALSE]
-  }
-} else {
-  label_candidates <- data.frame(
-    CHROM = character(), POS = numeric(), P = numeric(),
-    COORD = numeric(), geneset = character(), geneset_color = character(),
-    neg_log10_p = numeric(), LABEL = character(), stringsAsFactors = FALSE
-  )
 }
 
-# ── 数据导出：用 data_genesets 填充 geneset 列（全部54个基因集） ──
 if (has_data_genesets) {
-  all_chroms <- unique(gwas_df$CHROM)
-  for (chr in all_chroms) {
-    chr_mask <- gwas_df$CHROM == chr
-    chr_dregions <- data_region_df[data_region_df$chr == chr, , drop = FALSE]
-    if (nrow(chr_dregions) == 0) next
-    chr_dregions <- chr_dregions[nrow(chr_dregions):1, ]
+  for (chr_value in unique(gwas_df$CHROM)) {
+    chr_mask <- gwas_df$CHROM == chr_value
+    chr_regions <- data_region_df[data_region_df$chr_norm == chr_value, , drop = FALSE]
+    if (nrow(chr_regions) == 0) {
+      next
+    }
+
+    chr_regions <- chr_regions[nrow(chr_regions):1, , drop = FALSE]
     chr_pos <- gwas_df$POS[chr_mask]
     chr_geneset <- rep("", sum(chr_mask))
-    for (j in seq_len(nrow(chr_dregions))) {
-      in_region <- chr_pos >= chr_dregions$region_start[j] &
-                   chr_pos <= chr_dregions$region_end[j]
+    for (index in seq_len(nrow(chr_regions))) {
+      in_region <- chr_pos >= chr_regions$region_start[index] & chr_pos <= chr_regions$region_end[index]
       chr_geneset[in_region] <- ifelse(
         nchar(chr_geneset[in_region]) == 0,
-        chr_dregions$display_name[j],
-        paste(chr_geneset[in_region], chr_dregions$display_name[j], sep = ";")
+        chr_regions$display_name[index],
+        paste(chr_geneset[in_region], chr_regions$display_name[index], sep = ";")
       )
     }
     gwas_df$geneset[chr_mask] <- chr_geneset
   }
 }
+
+gwas_df$geneset <- dedupe_delimited_values(gwas_df$geneset)
 gwas_df$geneset[gwas_df$geneset == ""] <- "background"
 gwas_df$neg_log10_p <- -log10(pmax(gwas_df$P, .Machine$double.xmin))
-ensure_parent_dir(table_path)
+
+label_candidates <- gwas_df[
+  gwas_df$P <= label_p_threshold & gwas_df$geneset_color != "background",
+  c("CHROM", "POS", "SNP", "P", "COORD", "geneset_color", "neg_log10_p"),
+  drop = FALSE
+]
+if (nrow(label_candidates) > 0) {
+  label_candidates <- label_candidates[!duplicated(label_candidates$COORD), , drop = FALSE]
+  label_info <- annotate_nearest_genes(label_candidates$CHROM, label_candidates$POS, genes_by_chr)
+  label_candidates$LABEL <- label_info$nearest_gene
+  label_candidates <- label_candidates[label_candidates$LABEL != "", , drop = FALSE]
+} else {
+  label_candidates <- data.frame(
+    CHROM = character(),
+    POS = numeric(),
+    SNP = character(),
+    P = numeric(),
+    COORD = numeric(),
+    geneset_color = character(),
+    neg_log10_p = numeric(),
+    LABEL = character(),
+    stringsAsFactors = FALSE
+  )
+}
+
+variants_export <- data.frame(
+  chr = gwas_df$CHROM,
+  bp = gwas_df$POS,
+  snp = gwas_df$SNP,
+  p = gwas_df$P,
+  logp = gwas_df$neg_log10_p,
+  stringsAsFactors = FALSE
+)
+
+hit_mask <- gwas_df$P <= genomewide_threshold
+if (any(hit_mask)) {
+  hits_df <- gwas_df[hit_mask, c("CHROM", "POS", "SNP", "P", "neg_log10_p", "geneset"), drop = FALSE]
+  hit_info <- annotate_nearest_genes(hits_df$CHROM, hits_df$POS, genes_by_chr)
+  hit_programs <- unname(program_lookup[hit_info$nearest_gene])
+  hit_programs[is.na(hit_programs)] <- ""
+  hit_genesets <- hits_df$geneset
+  hit_genesets[hit_genesets == "background"] <- ""
+
+  hits_export <- data.frame(
+    chr = hits_df$CHROM,
+    bp = hits_df$POS,
+    snp = hits_df$SNP,
+    p = hits_df$P,
+    logp = hits_df$neg_log10_p,
+    nearest_gene = hit_info$nearest_gene,
+    distance_to_gene = hit_info$distance_to_gene,
+    program = hit_programs,
+    geneset = hit_genesets,
+    stringsAsFactors = FALSE
+  )
+} else {
+  hits_export <- data.frame(
+    chr = character(),
+    bp = numeric(),
+    snp = character(),
+    p = numeric(),
+    logp = numeric(),
+    nearest_gene = character(),
+    distance_to_gene = numeric(),
+    program = character(),
+    geneset = character(),
+    stringsAsFactors = FALSE
+  )
+}
+
+hits_path <- gsub("_variants\\.tsv$", "_hits.tsv", variants_path)
+if (hits_path == variants_path) {
+  hits_path <- gsub("\\.tsv$", "_hits.tsv", variants_path)
+}
+if (hits_path == variants_path) {
+  hits_path <- paste0(variants_path, "_hits.tsv")
+}
+
+ensure_parent_dir(variants_path)
 ensure_parent_dir(paste0(plot_prefix, ".pdf"))
 
-# 保存主表（geneset = 全量 ;分隔, geneset_color = 着色用）
-write.table(
-  gwas_df[, c("CHROM", "POS", "P", "COORD", "neg_log10_p", "geneset", "geneset_color")],
-  table_path,
-  row.names = FALSE, sep = "\t", quote = FALSE
-)
-# 显著位点单独存
-hits_path <- gsub("\\.tsv$", "_hits.tsv", table_path)
-if (hits_path == table_path) hits_path <- paste0(table_path, "_hits.tsv")
-write.table(label_candidates, hits_path, row.names = FALSE, sep = "\t", quote = FALSE)
+utils::write.table(variants_export, variants_path, row.names = FALSE, sep = "\t", quote = FALSE)
+utils::write.table(hits_export, hits_path, row.names = FALSE, sep = "\t", quote = FALSE)
 
-# 画图（用 geneset_color 着色）
 library(ggplot2)
 library(ggrepel)
 library(ggrastr)
@@ -186,8 +280,8 @@ if (length(unique_sets) > 0) {
     "#1F77B4", "#D62728", "#2CA02C", "#FF7F0E", "#9467BD",
     "#8C564B", "#E377C2", "#7F7F7F", "#BCBD22", "#17BECF"
   )
-  for (i in seq_along(unique_sets)) {
-    palette_values[unique_sets[i]] <- highlight_colors[((i - 1) %% length(highlight_colors)) + 1]
+  for (index in seq_along(unique_sets)) {
+    palette_values[unique_sets[index]] <- highlight_colors[((index - 1) %% length(highlight_colors)) + 1]
   }
 }
 
@@ -202,8 +296,13 @@ g <- g + geom_hline(yintercept = -log10(genomewide_threshold), linetype = "dashe
 
 if (nrow(label_candidates) > 0) {
   g <- g + geom_point(data = label_candidates, size = 2.5, alpha = 0.9, show.legend = FALSE)
-  g <- g + geom_text_repel(data = label_candidates, aes(label = LABEL),
-    size = 5, max.overlaps = 100, show.legend = FALSE)
+  g <- g + geom_text_repel(
+    data = label_candidates,
+    aes(label = LABEL),
+    size = 5,
+    max.overlaps = 100,
+    show.legend = FALSE
+  )
 }
 
 g <- g + scale_x_continuous(labels = axis_df$CHROM, breaks = axis_df$center)
