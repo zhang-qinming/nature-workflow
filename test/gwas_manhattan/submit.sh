@@ -1,115 +1,101 @@
 #!/usr/bin/env bash
-# ============================================================================
-# 提交全部 GWAS Manhattan 任务 — 1 ID = 1 Slurm Job
-#
-# 用法:
-#   bash test/gwas_manhattan/submit.sh
-#   DRY_RUN=1 bash test/gwas_manhattan/submit.sh  # 只列不提交
-#
-# 可调参数:
-#   MAX_CONCURRENT  同时运行的最大 Job 数 (默认 200，超过后等待)
-#   START_ID        从指定 GWAS ID 开始 (默认: 从头开始)
-# ============================================================================
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${PROJECT_ROOT:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 FILE_ID_MAP="${FILE_ID_MAP:-${PROJECT_ROOT}/configs/path.file_id_map.tsv}"
-RUN_SCRIPT="${SCRIPT_DIR}/run_one.sh"
+
+TASK_NAME="${TASK_NAME:-gwas_manhattan123}"
+JOB_NAME="${JOB_NAME:-gman123}"
+
 OUTPUT_ROOT="${OUTPUT_ROOT:-/gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all/outputs}"
 OUTPUT_DIR="${OUTPUT_DIR:-${OUTPUT_ROOT}/gwas_manhattan}"
-STATUS_DIR="${STATUS_DIR:-${OUTPUT_DIR}/status}"
-LOGS_DIR="${LOGS_DIR:-${OUTPUT_DIR}/logs}"
-FAILURE_DIR="${FAILURE_DIR:-${OUTPUT_DIR}/failed}"
+RUN_ROOT="${RUN_ROOT:-${OUTPUT_ROOT}/${TASK_NAME}}"
+BATCH_ROOT="${BATCH_ROOT:-/gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all/scripts/${TASK_NAME}}"
 
-MAX_CONCURRENT="${MAX_CONCURRENT:-200}"
-DRY_RUN="${DRY_RUN:-0}"
+STATUS_DIR="${STATUS_DIR:-${RUN_ROOT}/status}"
+LOGS_DIR="${LOGS_DIR:-${RUN_ROOT}/logs}"
+FAILURE_DIR="${FAILURE_DIR:-${RUN_ROOT}/failed}"
+MANIFEST_PATH="${MANIFEST_PATH:-${BATCH_ROOT}/manifest.tsv}"
+
 START_ID="${START_ID:-}"
+DRY_RUN="${DRY_RUN:-0}"
+MAX_PENDING="${MAX_PENDING:-100}"
+SQUEUE_USER="${SQUEUE_USER:-${USER}}"
 
 mkdir -p "${STATUS_DIR}" "${LOGS_DIR}" "${FAILURE_DIR}"
 
-# ---- 读取全部 GWAS ID ----
-echo "==> 读取 GWAS IDs..."
-mapfile -t ALL_IDS < <(tail -n +2 "${FILE_ID_MAP}" | cut -f1)
-echo "  共 ${#ALL_IDS[@]} 个"
-
-# 如果指定了起始 ID，跳过之前的
-SKIP=true
-if [ -z "${START_ID}" ]; then
-    SKIP=false
+if [ ! -f "${MANIFEST_PATH}" ]; then
+    echo "Manifest not found: ${MANIFEST_PATH}" >&2
+    echo "Run: bash test/gwas_manhattan/generate.sh" >&2
+    exit 1
 fi
+
+pending_count() {
+    squeue -u "${SQUEUE_USER}" -h -t PD -n "${JOB_NAME}" 2>/dev/null | wc -l
+}
+
+SKIP=true
+[ -z "${START_ID}" ] && SKIP=false
 
 SUBMITTED=0
 SKIPPED=0
 FAILED_SUBMIT=0
 
-echo ""
-echo "==> 开始提交 (最多 ${MAX_CONCURRENT} 并发)..."
-echo ""
+while IFS=$'\t' read -r gwas_id script_path; do
+    [ "${gwas_id}" = "gwas_id" ] && continue
 
-BATCH_COUNT=0
-
-for gwas_id in "${ALL_IDS[@]}"; do
-    # 起始 ID 过滤
     if [ "${SKIP}" = true ]; then
         if [ "${gwas_id}" = "${START_ID}" ]; then
             SKIP=false
         else
-            ((SKIPPED++)) || true
             continue
         fi
     fi
 
-    # 跳过已成功 / 运行中
     if [ -f "${STATUS_DIR}/${gwas_id}.ok" ] || [ -f "${STATUS_DIR}/${gwas_id}.running" ]; then
+        ((SKIPPED++)) || true
         continue
     fi
 
-    # 每攒够 MAX_CONCURRENT 个，等队列水位降到一半再继续
-    if [ "${BATCH_COUNT}" -ge "${MAX_CONCURRENT}" ]; then
-        echo "  ... 已提交 ${SUBMITTED}, 等待队列降到 $((MAX_CONCURRENT / 2)) ..."
-        while true; do
-            RUNNING=$(squeue -n gman --noheader 2>/dev/null | wc -l)
-            [ "${RUNNING}" -lt $((MAX_CONCURRENT / 2)) ] && break
-            sleep 10
-        done
-        BATCH_COUNT=0
+    if [ ! -f "${script_path}" ]; then
+        printf 'time=%s\nreason=missing_generated_script\nscript_path=%s\n' \
+            "$(date -Iseconds)" "${script_path}" > "${STATUS_DIR}/${gwas_id}.failed"
+        cp "${STATUS_DIR}/${gwas_id}.failed" "${FAILURE_DIR}/${gwas_id}.failed"
+        ((FAILED_SUBMIT++)) || true
+        continue
     fi
+
+    while [ "$(pending_count)" -ge "${MAX_PENDING}" ]; do
+        sleep 10
+    done
 
     if [ "${DRY_RUN}" = "1" ]; then
-        echo "[DRY RUN] sbatch --export=GWAS_ID=${gwas_id} ${RUN_SCRIPT}"
+        echo "[DRY RUN] sbatch ${script_path}"
         ((SUBMITTED++)) || true
-        ((BATCH_COUNT++)) || true
-    else
-        if job_id=$(sbatch --parsable \
-            --chdir="${PROJECT_ROOT}" \
-            --output="${LOGS_DIR}/gman_%A.out" \
-            --error="${LOGS_DIR}/gman_%A.err" \
-            --export="ALL,GWAS_ID=${gwas_id},PROJECT_ROOT=${PROJECT_ROOT},OUTPUT_ROOT=${OUTPUT_ROOT},OUTPUT_DIR=${OUTPUT_DIR},STATUS_DIR=${STATUS_DIR}" \
-            "${RUN_SCRIPT}" 2>&1); then
-            echo "[${SUBMITTED}] ${gwas_id} -> Job ${job_id}"
-            echo "${job_id}" > "${STATUS_DIR}/${gwas_id}.running"
-            rm -f "${FAILURE_DIR}/${gwas_id}.failed"
-            ((SUBMITTED++)) || true
-            ((BATCH_COUNT++)) || true
-        else
-            echo "[FAIL] ${gwas_id} 提交失败"
-            printf '%s | SUBMIT_FAILED | %s\n' "$(date -Iseconds)" "${job_id}" > "${STATUS_DIR}/${gwas_id}.failed"
-            cp "${STATUS_DIR}/${gwas_id}.failed" "${FAILURE_DIR}/${gwas_id}.failed"
-            ((FAILED_SUBMIT++)) || true
-        fi
+        continue
     fi
-done
+
+    submit_output=""
+    if submit_output="$(sbatch --parsable "${script_path}" 2>&1)"; then
+        echo "${submit_output}" > "${STATUS_DIR}/${gwas_id}.running"
+        rm -f "${FAILURE_DIR}/${gwas_id}.failed"
+        echo "[OK] ${gwas_id} -> Job ${submit_output}"
+        ((SUBMITTED++)) || true
+    else
+        echo "[FAIL] ${gwas_id} submit failed"
+        printf 'time=%s\nreason=submit_failed\nmessage=%s\n' \
+            "$(date -Iseconds)" "${submit_output}" > "${STATUS_DIR}/${gwas_id}.failed"
+        cp "${STATUS_DIR}/${gwas_id}.failed" "${FAILURE_DIR}/${gwas_id}.failed"
+        ((FAILED_SUBMIT++)) || true
+    fi
+done < "${MANIFEST_PATH}"
 
 echo ""
-echo "============================================"
-echo "  提交完毕"
-echo "============================================"
-echo "  提交成功:    ${SUBMITTED}"
-echo "  提交失败:    ${FAILED_SUBMIT}"
-echo "  跳过:        ${SKIPPED}"
-echo ""
-echo "  查看状态:    bash test/gwas_manhattan/check.sh"
-echo "  重跑失败:    bash test/gwas_manhattan/rerun.sh"
-echo "  队列中:      squeue -n gman"
+echo "Task name: ${TASK_NAME}"
+echo "Job name: ${JOB_NAME}"
+echo "Submitted: ${SUBMITTED}"
+echo "Skipped: ${SKIPPED}"
+echo "Submit failed: ${FAILED_SUBMIT}"
+echo "Check: bash test/gwas_manhattan/check.sh"
