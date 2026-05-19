@@ -15,16 +15,19 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${PROJECT_ROOT:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
-FILE_ID_MAP="${PROJECT_ROOT}/configs/path.file_id_map.tsv"
+FILE_ID_MAP="${FILE_ID_MAP:-${PROJECT_ROOT}/configs/path.file_id_map.tsv}"
 RUN_SCRIPT="${SCRIPT_DIR}/run_one.sh"
-STATUS_DIR="/gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all/outputs/status"
-LOGS_DIR="/gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all/outputs/logs"
+OUTPUT_ROOT="${OUTPUT_ROOT:-/gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all/outputs}"
+OUTPUT_DIR="${OUTPUT_DIR:-${OUTPUT_ROOT}/gwas_manhattan}"
+STATUS_DIR="${STATUS_DIR:-${OUTPUT_DIR}/status}"
+LOGS_DIR="${LOGS_DIR:-${OUTPUT_DIR}/logs}"
+FAILURE_DIR="${FAILURE_DIR:-${OUTPUT_DIR}/failed}"
 
 MAX_CONCURRENT="${MAX_CONCURRENT:-200}"
 DRY_RUN="${DRY_RUN:-0}"
 START_ID="${START_ID:-}"
 
-mkdir -p "${STATUS_DIR}" "${LOGS_DIR}"
+mkdir -p "${STATUS_DIR}" "${LOGS_DIR}" "${FAILURE_DIR}"
 
 # ---- 读取全部 GWAS ID ----
 echo "==> 读取 GWAS IDs..."
@@ -79,13 +82,21 @@ for gwas_id in "${ALL_IDS[@]}"; do
         ((SUBMITTED++)) || true
         ((BATCH_COUNT++)) || true
     else
-        if job_id=$(sbatch --parsable --export="ALL,GWAS_ID=${gwas_id}" "${RUN_SCRIPT}" 2>/dev/null); then
+        if job_id=$(sbatch --parsable \
+            --chdir="${PROJECT_ROOT}" \
+            --output="${LOGS_DIR}/gman_%A.out" \
+            --error="${LOGS_DIR}/gman_%A.err" \
+            --export="ALL,GWAS_ID=${gwas_id},PROJECT_ROOT=${PROJECT_ROOT},OUTPUT_ROOT=${OUTPUT_ROOT},OUTPUT_DIR=${OUTPUT_DIR},STATUS_DIR=${STATUS_DIR}" \
+            "${RUN_SCRIPT}" 2>&1); then
             echo "[${SUBMITTED}] ${gwas_id} -> Job ${job_id}"
             echo "${job_id}" > "${STATUS_DIR}/${gwas_id}.running"
+            rm -f "${FAILURE_DIR}/${gwas_id}.failed"
             ((SUBMITTED++)) || true
             ((BATCH_COUNT++)) || true
         else
             echo "[FAIL] ${gwas_id} 提交失败"
+            printf '%s | SUBMIT_FAILED | %s\n' "$(date -Iseconds)" "${job_id}" > "${STATUS_DIR}/${gwas_id}.failed"
+            cp "${STATUS_DIR}/${gwas_id}.failed" "${FAILURE_DIR}/${gwas_id}.failed"
             ((FAILED_SUBMIT++)) || true
         fi
     fi
