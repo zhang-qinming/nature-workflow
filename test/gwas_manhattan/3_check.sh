@@ -13,6 +13,10 @@ OUTPUT_ROOT="${OUTPUT_ROOT:-/gpfs/chencao/qinminzhang/workflow/catalog_lof/figur
 OUTPUT_DIR="${OUTPUT_DIR:-${OUTPUT_ROOT}/gwas_manhattan}"
 RUN_ROOT="${RUN_ROOT:-${OUTPUT_ROOT}/${TASK_NAME}}"
 STATUS_DIR="${STATUS_DIR:-${RUN_ROOT}/status}"
+FAILURE_DIR="${FAILURE_DIR:-${RUN_ROOT}/failed}"
+RECONCILE_STALE="${RECONCILE_STALE:-1}"
+
+mkdir -p "${STATUS_DIR}" "${FAILURE_DIR}"
 
 mapfile -t ALL_IDS < <(awk -F '\t' 'NR > 1 { sub(/\r$/, "", $1); print $1 }' "${FILE_ID_MAP}")
 EXPECTED_TOTAL="${#ALL_IDS[@]}"
@@ -25,6 +29,8 @@ pdf=0
 table_main=0
 table_hits=0
 failed_files=()
+stale_ids=()
+reconciled_stale=0
 
 job_still_active() {
     local job_id="$1"
@@ -48,7 +54,18 @@ for source_id in "${ALL_IDS[@]}"; do
         if job_still_active "${running_job_id}"; then
             ((running++)) || true
         else
-            ((stale++)) || true
+            stale_ids+=("${source_id}")
+            if [ "${RECONCILE_STALE}" = "1" ]; then
+                printf 'time=%s\nreason=stale_or_cancelled\njob_id=%s\nmessage=running marker exists but job is no longer visible in squeue\n' \
+                    "$(date -Iseconds)" "${running_job_id}" > "${STATUS_DIR}/${source_id}.failed"
+                cp "${STATUS_DIR}/${source_id}.failed" "${FAILURE_DIR}/${source_id}.failed"
+                rm -f "${STATUS_DIR}/${source_id}.running"
+                failed_files+=("${STATUS_DIR}/${source_id}.failed")
+                ((failed++)) || true
+                ((reconciled_stale++)) || true
+            else
+                ((stale++)) || true
+            fi
         fi
     fi
 
@@ -57,7 +74,7 @@ for source_id in "${ALL_IDS[@]}"; do
     [ -f "${OUTPUT_DIR}/tables/${source_id}_hits.tsv" ] && ((table_hits++)) || true
 done
 
-processed=$((ok + failed + running))
+processed=$((ok + failed + running + stale))
 pending=$((EXPECTED_TOTAL - processed))
 pd_count=0
 r_count=0
@@ -76,6 +93,7 @@ echo "OK:        ${ok}"
 echo "Failed:    ${failed}"
 echo "Running:   ${running}"
 echo "Stale:     ${stale}"
+echo "Reconciled:${reconciled_stale}"
 echo "Pending:   ${pending}"
 echo "PD queue:  ${pd_count}"
 echo "R queue:   ${r_count}"
@@ -91,4 +109,10 @@ if [ "${failed}" -gt 0 ]; then
         echo "--- $(basename "${path}" .failed) ---"
         cat "${path}"
     done
+fi
+
+if [ "${stale}" -gt 0 ]; then
+    echo ""
+    echo "Stale IDs:"
+    printf '%s\n' "${stale_ids[@]}" | head -20
 fi

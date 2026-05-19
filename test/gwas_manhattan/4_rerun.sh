@@ -20,6 +20,7 @@ DRY_RUN="${DRY_RUN:-0}"
 MAX_PENDING="${MAX_PENDING:-100}"
 RERUN_MEM="${RERUN_MEM:-32G}"
 RERUN_CPUS="${RERUN_CPUS:-2}"
+INCLUDE_STALE="${INCLUDE_STALE:-1}"
 
 if [ ! -f "${MANIFEST_PATH}" ]; then
     echo "Manifest not found: ${MANIFEST_PATH}" >&2
@@ -45,6 +46,16 @@ else
         [ -f "${path}" ] || continue
         FAILED_IDS+=("$(basename "${path}" .failed)")
     done
+    if [ "${INCLUDE_STALE}" = "1" ]; then
+        for path in "${STATUS_DIR}"/*.running; do
+            [ -f "${path}" ] || continue
+            FAILED_IDS+=("$(basename "${path}" .running)")
+        done
+    fi
+fi
+
+if [ "${#FAILED_IDS[@]}" -gt 0 ]; then
+    mapfile -t FAILED_IDS < <(printf '%s\n' "${FAILED_IDS[@]}" | awk '!seen[$0]++')
 fi
 
 if [ "${#FAILED_IDS[@]}" -eq 0 ]; then

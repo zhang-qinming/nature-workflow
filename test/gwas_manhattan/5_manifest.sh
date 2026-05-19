@@ -31,8 +31,8 @@ mapfile -t ALL_IDS < <(awk -F '\t' 'NR > 1 { sub(/\r$/, "", $1); print $1 }' "${
         plot_png="${PLOTS_DIR}/${source_id}.png"
         status="missing"
         [ -f "${STATUS_DIR}/${source_id}.ok" ] && status="ok"
-        [ -f "${STATUS_DIR}/${source_id}.running" ] && status="running"
         [ -f "${STATUS_DIR}/${source_id}.failed" ] && status="failed"
+        [ -f "${STATUS_DIR}/${source_id}.running" ] && [ "${status}" = "missing" ] && status="running"
         printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
             "${source_id}" \
             "gwas_manhattan" \
