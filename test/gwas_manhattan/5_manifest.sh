@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${PROJECT_ROOT:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 FILE_ID_MAP="${FILE_ID_MAP:-${PROJECT_ROOT}/configs/path.file_id_map.tsv}"
 
-TASK_NAME="${TASK_NAME:-gwas_manhattan123}"
+TASK_NAME="${TASK_NAME:-gwas_manhattan}"
 
 OUTPUT_ROOT="${OUTPUT_ROOT:-/gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all/outputs}"
 OUTPUT_DIR="${OUTPUT_DIR:-${OUTPUT_ROOT}/gwas_manhattan}"
@@ -20,7 +20,7 @@ MANIFEST_OUT="${MANIFEST_OUT:-${META_DIR}/manifest_all.tsv}"
 
 mkdir -p "${META_DIR}"
 
-mapfile -t ALL_IDS < <(tail -n +2 "${FILE_ID_MAP}" | cut -f1)
+mapfile -t ALL_IDS < <(awk -F '\t' 'NR > 1 { sub(/\r$/, "", $1); print $1 }' "${FILE_ID_MAP}")
 
 {
     printf 'figure_id\tfigure_kind\tsource_id\ttable_path\thits_path\tplot_pdf\tplot_png\tstatus\n'

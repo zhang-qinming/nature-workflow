@@ -6,8 +6,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${PROJECT_ROOT:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 FILE_ID_MAP="${FILE_ID_MAP:-${PROJECT_ROOT}/configs/path.file_id_map.tsv}"
 
-TASK_NAME="${TASK_NAME:-gwas_manhattan123}"
-JOB_NAME="${JOB_NAME:-gman123}"
+TASK_NAME="${TASK_NAME:-gwas_manhattan}"
+JOB_NAME="${JOB_NAME:-gman}"
 
 OUTPUT_ROOT="${OUTPUT_ROOT:-/gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all/outputs}"
 OUTPUT_DIR="${OUTPUT_DIR:-${OUTPUT_ROOT}/gwas_manhattan}"
@@ -36,6 +36,17 @@ pending_count() {
     squeue -u "${SQUEUE_USER}" -h -t PD -n "${JOB_NAME}" 2>/dev/null | wc -l
 }
 
+job_still_active() {
+    local job_id="$1"
+    if ! command -v squeue >/dev/null 2>&1; then
+        return 0
+    fi
+    if [ -z "${job_id}" ]; then
+        return 1
+    fi
+    squeue -j "${job_id}" -h 2>/dev/null | grep -q .
+}
+
 SKIP=true
 [ -z "${START_ID}" ] && SKIP=false
 
@@ -45,6 +56,8 @@ FAILED_SUBMIT=0
 
 while IFS=$'\t' read -r gwas_id script_path; do
     [ "${gwas_id}" = "gwas_id" ] && continue
+    gwas_id="${gwas_id%$'\r'}"
+    script_path="${script_path%$'\r'}"
 
     if [ "${SKIP}" = true ]; then
         if [ "${gwas_id}" = "${START_ID}" ]; then
@@ -54,9 +67,18 @@ while IFS=$'\t' read -r gwas_id script_path; do
         fi
     fi
 
-    if [ -f "${STATUS_DIR}/${gwas_id}.ok" ] || [ -f "${STATUS_DIR}/${gwas_id}.running" ]; then
+    if [ -f "${STATUS_DIR}/${gwas_id}.ok" ]; then
         ((SKIPPED++)) || true
         continue
+    fi
+
+    if [ -f "${STATUS_DIR}/${gwas_id}.running" ]; then
+        running_job_id="$(tr -d '[:space:]' < "${STATUS_DIR}/${gwas_id}.running" 2>/dev/null || true)"
+        if job_still_active "${running_job_id}"; then
+            ((SKIPPED++)) || true
+            continue
+        fi
+        rm -f "${STATUS_DIR}/${gwas_id}.running"
     fi
 
     if [ ! -f "${script_path}" ]; then

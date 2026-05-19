@@ -6,8 +6,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${PROJECT_ROOT:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 FILE_ID_MAP="${FILE_ID_MAP:-${PROJECT_ROOT}/configs/path.file_id_map.tsv}"
 
-TASK_NAME="${TASK_NAME:-gwas_manhattan123}"
-JOB_NAME="${JOB_NAME:-gman123}"
+TASK_NAME="${TASK_NAME:-gwas_manhattan}"
+JOB_NAME="${JOB_NAME:-gman}"
 
 OUTPUT_ROOT="${OUTPUT_ROOT:-/gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all/outputs}"
 OUTPUT_DIR="${OUTPUT_DIR:-${OUTPUT_ROOT}/gwas_manhattan}"
@@ -38,7 +38,7 @@ if [ ! -f "${WORKER_SCRIPT}" ]; then
     exit 1
 fi
 
-mapfile -t ALL_IDS < <(tail -n +2 "${FILE_ID_MAP}" | cut -f1)
+mapfile -t ALL_IDS < <(awk -F '\t' 'NR > 1 { sub(/\r$/, "", $1); print $1 }' "${FILE_ID_MAP}")
 
 if [ "${#ALL_IDS[@]}" -eq 0 ]; then
     echo "No GWAS IDs found in ${FILE_ID_MAP}" >&2

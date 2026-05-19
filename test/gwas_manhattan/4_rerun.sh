@@ -5,8 +5,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${PROJECT_ROOT:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 
-TASK_NAME="${TASK_NAME:-gwas_manhattan123}"
-JOB_NAME="${JOB_NAME:-gman123}"
+TASK_NAME="${TASK_NAME:-gwas_manhattan}"
+JOB_NAME="${JOB_NAME:-gman}"
 
 OUTPUT_ROOT="${OUTPUT_ROOT:-/gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all/outputs}"
 RUN_ROOT="${RUN_ROOT:-${OUTPUT_ROOT}/${TASK_NAME}}"
@@ -30,6 +30,8 @@ while IFS=$'\t' read -r gwas_id script_path; do
     if [ "${gwas_id}" = "gwas_id" ]; then
         continue
     fi
+    gwas_id="${gwas_id%$'\r'}"
+    script_path="${script_path%$'\r'}"
     SCRIPT_BY_ID["${gwas_id}"]="${script_path}"
 done < "${MANIFEST_PATH}"
 
