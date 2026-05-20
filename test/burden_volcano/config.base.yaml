@@ -1,0 +1,26 @@
+project_root: ../..
+artifact_root: /gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all/outputs
+
+executables:
+  plot_rscript:
+    - conda
+    - run
+    - --no-capture-output
+    - -n
+    - paper-pipeline-plot
+    - Rscript
+
+workflows:
+  figures:
+    shared_inputs:
+      file_id_map: ../../configs/path.file_id_map.tsv
+      gene_map: /gpfs/chencao/qinminzhang/Nature/mine/code/data/gencode_v41_gname_gid_ALL_sorted_onlyID
+      geneset_dir: /gpfs/chencao/qinminzhang/Nature/mine/code/data/geneset
+      spectra_path: /gpfs/chencao/qinminzhang/Nature/mine/code/outputs/perturbseq/cnmf_genomewide/cNMF/cNMF_all/cNMF_all.gene_spectra_score.k_60.dt_0_5.txt
+
+    shared_parameters:
+      highlight_genesets:
+        - HALLMARK_HEME_METABOLISM
+        - Hematopoiesisgenes
+        - mitotic_cell_cycle
+        - positive_macromolecule_synthesis
