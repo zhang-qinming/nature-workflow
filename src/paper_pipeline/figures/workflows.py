@@ -171,6 +171,7 @@ class ResolvedFiguresGeneLevelQq:
     output_dir: Path
     targets: tuple[GeneLevelScatterTarget, ...]
     y_limit: float
+    render_plot: bool
 
 
 @dataclass(frozen=True)
@@ -999,6 +1000,7 @@ def _resolve_figures_gene_level_qq(config: LoadedConfig) -> ResolvedFiguresGeneL
         output_dir=config.resolve_path_or_artifact(outputs.get("output_dir"), "gene_level_qq"),
         targets=tuple(targets),
         y_limit=float(parameters.get("y_limit", 10.0)),
+        render_plot=bool(parameters.get("render_plot", True)),
     )
 
 
@@ -1743,6 +1745,7 @@ def build_figures_gene_level_qq_tasks(config: LoadedConfig) -> list[Task]:
             table_path,
             plot_prefix,
             resolved.y_limit,
+            int(resolved.render_plot),
         )
         tasks.append(
             Task(
@@ -1750,7 +1753,7 @@ def build_figures_gene_level_qq_tasks(config: LoadedConfig) -> list[Task]:
                 preview=preview_command(command),
                 command=command,
             )
-    )
+        )
         manifest_rows.append(
             {
                 "figure_id": target.source_id,
@@ -1760,8 +1763,8 @@ def build_figures_gene_level_qq_tasks(config: LoadedConfig) -> list[Task]:
                 "limma_path": str(resolved.limma_path),
                 "shet_path": str(resolved.shet_path),
                 "table_path": str(table_path),
-                "plot_pdf": str(plot_prefix.with_suffix(".pdf")),
-                "plot_png": str(plot_prefix.with_suffix(".png")),
+                "plot_pdf": str(plot_prefix.with_suffix(".pdf")) if resolved.render_plot else "",
+                "plot_png": str(plot_prefix.with_suffix(".png")) if resolved.render_plot else "",
             }
         )
 

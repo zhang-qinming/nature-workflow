@@ -333,6 +333,7 @@ workflows:
       parameters:
         lof_ids: [GCST90081631]
         output_id: GCST90081631
+        render_plot: false
 
     cross_trait:
       # inputs.file_id_map inherited from shared_inputs.
