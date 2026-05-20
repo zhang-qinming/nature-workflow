@@ -23,56 +23,92 @@ posterior_df <- data.table::fread(posterior_path, data.table = FALSE)
 if (!all(c("ensg", "post_mean") %in% names(posterior_df))) {
   stop(sprintf("Posterior file %s must have columns: ensg, post_mean", posterior_path))
 }
+posterior_df$ensg <- normalize_ensg_ids(posterior_df$ensg)
 posterior_df$post_mean[is.infinite(posterior_df$post_mean)] <- NA
 
 limma_raw <- data.table::fread(limma_path, data.table = FALSE)
 limma_mat <- as.matrix(limma_raw[, -1, drop = FALSE])
 row.names(limma_mat) <- limma_raw[[1]]
-perturb_genes <- colnames(limma_mat)
+target_ids <- row.names(limma_mat)
+perturb_ids <- colnames(limma_mat)
 
 shet_df <- utils::read.table(shet_path, header = TRUE, stringsAsFactors = FALSE)
+shet_df$ensg <- normalize_ensg_ids(shet_df$ensg)
 
-gene_map <- read_gene_map(gene_map_path)
-ensg_lookup <- stats::setNames(gene_map$ensg, gene_map$gene)
+lookups <- build_gene_id_lookups(gene_map_path)
+target_ensg <- lookups$resolve_to_ensg(target_ids)
+perturb_ensg <- lookups$resolve_to_ensg(perturb_ids)
 
 shet_sub <- shet_df[shet_df$ensg %in% posterior_df$ensg, ]
-n_genes <- length(perturb_genes)
+n_targets <- nrow(limma_mat)
 
-corr_list <- lapply(seq_len(n_genes), function(i) {
-  target_gene <- perturb_genes[i]
-  pb <- limma_mat[, i]
+corr_list <- lapply(seq_len(n_targets), function(i) {
+  pb <- limma_mat[i, ]
   pb_df <- data.frame(
-    gene = names(pb),
+    gene = perturb_ids,
     perturb_beta = as.numeric(pb),
     stringsAsFactors = FALSE
   )
-  pb_df$ensg <- ensg_lookup[pb_df$gene]
+  pb_df$ensg <- perturb_ensg
 
   df <- merge(pb_df, posterior_df[, c("ensg", "post_mean")], by = "ensg", all = FALSE)
-  df <- df[!is.na(df$post_mean) & !is.na(df$perturb_beta), ]
-  df <- df[df$ensg != ensg_lookup[target_gene], ]
+  df <- df[!is.na(df$ensg) & !is.na(df$post_mean) & !is.na(df$perturb_beta), ]
+  if (!is.na(target_ensg[i])) {
+    df <- df[df$ensg != target_ensg[i], ]
+  }
   df <- merge(df, shet_sub, by = "ensg", all = FALSE)
   if (nrow(df) < 10) {
+    return(NULL)
+  }
+  if (stats::sd(df$post_mean, na.rm = TRUE) == 0 || stats::sd(df$perturb_beta, na.rm = TRUE) == 0) {
     return(NULL)
   }
 
   df$post_mean_sc <- scale(df$post_mean)
   df$perturb_beta_sc <- scale(df$perturb_beta)
 
-  fit <- lm(post_mean_sc ~ perturb_beta_sc + shet, data = df)
+  fit <- tryCatch(lm(post_mean_sc ~ perturb_beta_sc + shet, data = df), error = function(e) NULL)
+  if (is.null(fit)) {
+    return(NULL)
+  }
   sm <- summary(fit)$coefficients
+  if (!"perturb_beta_sc" %in% row.names(sm)) {
+    return(NULL)
+  }
 
   data.frame(
-    ensg = ensg_lookup[target_gene],
-    P_withShet = sm[2, 4],
-    beta_withShet = sm[2, 1],
+    ensg = target_ensg[i],
+    P_withShet = sm["perturb_beta_sc", 4],
+    beta_withShet = sm["perturb_beta_sc", 1],
     stringsAsFactors = FALSE
   )
 })
 
 correlation_df <- do.call(rbind, corr_list[!vapply(corr_list, is.null, logical(1))])
 if (is.null(correlation_df) || nrow(correlation_df) == 0) {
-  stop("No perturb genes produced valid correlation results")
+  unresolved_targets <- unique(target_ids[is.na(target_ensg)])
+  unresolved_perturb <- unique(perturb_ids[is.na(perturb_ensg)])
+  stop(sprintf(
+    paste(
+      "No gene-level QQ points produced valid correlation results",
+      "(limma rows=%d, resolved target ENSG=%d, perturb columns=%d, resolved perturb ENSG=%d, posterior genes=%d, shet genes=%d).",
+      "Example unresolved target IDs: %s.",
+      "Example unresolved perturb IDs: %s."
+    ),
+    length(target_ids),
+    sum(!is.na(target_ensg)),
+    length(perturb_ids),
+    sum(!is.na(perturb_ensg)),
+    length(unique(posterior_df$ensg)),
+    length(unique(shet_sub$ensg)),
+    if (length(unresolved_targets) > 0) paste(head(unresolved_targets, 5), collapse = ", ") else "none",
+    if (length(unresolved_perturb) > 0) paste(head(unresolved_perturb, 5), collapse = ", ") else "none"
+  ))
+}
+
+correlation_df <- correlation_df[!is.na(correlation_df$ensg) & nzchar(correlation_df$ensg), , drop = FALSE]
+if (nrow(correlation_df) == 0) {
+  stop("No QQ rows remained after ENSG resolution")
 }
 
 correlation_df$signed_log10_p <- sign(correlation_df$beta_withShet) *

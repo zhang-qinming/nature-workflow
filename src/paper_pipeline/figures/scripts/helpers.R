@@ -41,6 +41,12 @@ read_geneset_members <- function(geneset_dir, geneset_name) {
   unique(read.table(geneset_path, header = FALSE, stringsAsFactors = FALSE)[, 1])
 }
 
+normalize_ensg_ids <- function(ids) {
+  ids <- trimws(as.character(ids))
+  ids[is.na(ids)] <- ""
+  sub("\\..*$", "", ids)
+}
+
 read_gene_map <- function(gene_map_path) {
   gene_map <- utils::read.table(gene_map_path, header = FALSE, stringsAsFactors = FALSE)
   if (ncol(gene_map) < 2) {
@@ -48,7 +54,34 @@ read_gene_map <- function(gene_map_path) {
   }
   gene_map <- gene_map[, 1:2]
   colnames(gene_map) <- c("ensg", "gene")
+  gene_map$ensg <- normalize_ensg_ids(gene_map$ensg)
+  gene_map$gene <- trimws(as.character(gene_map$gene))
+  gene_map <- gene_map[nzchar(gene_map$ensg) & nzchar(gene_map$gene), , drop = FALSE]
+  gene_map <- gene_map[!duplicated(gene_map$ensg), , drop = FALSE]
+  gene_map <- gene_map[!duplicated(gene_map$gene), , drop = FALSE]
   gene_map
+}
+
+build_gene_id_lookups <- function(gene_map_path) {
+  gene_map <- read_gene_map(gene_map_path)
+  gene_lookup <- stats::setNames(gene_map$gene, gene_map$ensg)
+  ensg_lookup <- stats::setNames(gene_map$ensg, gene_map$gene)
+
+  resolve_to_ensg <- function(ids) {
+    raw_ids <- trimws(as.character(ids))
+    normalized_ids <- normalize_ensg_ids(raw_ids)
+    resolved <- ifelse(grepl("^ENSG", normalized_ids), normalized_ids, unname(ensg_lookup[raw_ids]))
+    resolved <- normalize_ensg_ids(resolved)
+    resolved[!nzchar(resolved)] <- NA_character_
+    unname(resolved)
+  }
+
+  list(
+    gene_map = gene_map,
+    gene_lookup = gene_lookup,
+    ensg_lookup = ensg_lookup,
+    resolve_to_ensg = resolve_to_ensg
+  )
 }
 
 read_program_membership_lookup <- function(spectra_path, gene_map_path, k = 60, top_n = 100) {

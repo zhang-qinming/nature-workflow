@@ -28,55 +28,65 @@ posterior_df <- data.table::fread(posterior_path, data.table = FALSE)
 if (!all(c("ensg", "post_mean") %in% names(posterior_df))) {
   stop(sprintf("Posterior file %s must have columns: ensg, post_mean", posterior_path))
 }
+posterior_df$ensg <- normalize_ensg_ids(posterior_df$ensg)
 posterior_df$post_mean[is.infinite(posterior_df$post_mean)] <- NA
 
 # limma logFC 矩阵（行=表达基因, 列=扰动基因）
 limma_raw <- data.table::fread(limma_path, data.table = FALSE)
 limma_mat <- as.matrix(limma_raw[, -1, drop = FALSE])
 row.names(limma_mat) <- limma_raw[[1]]
-perturb_genes <- colnames(limma_mat)
+target_ids <- row.names(limma_mat)
+perturb_ids <- colnames(limma_mat)
 
 # shet 协变量
 shet_df <- utils::read.table(shet_path, header = TRUE, stringsAsFactors = FALSE)
+shet_df$ensg <- normalize_ensg_ids(shet_df$ensg)
 
 # ── 基因映射：ensg ↔ gene symbol ──
-gene_map <- read_gene_map(gene_map_path)
-gene_lookup <- stats::setNames(gene_map$gene, gene_map$ensg)  # ensg → symbol
-ensg_lookup <- stats::setNames(gene_map$ensg, gene_map$gene)  # symbol → ensg
+lookups <- build_gene_id_lookups(gene_map_path)
+gene_lookup <- lookups$gene_lookup
+target_ensg <- lookups$resolve_to_ensg(target_ids)
+perturb_ensg <- lookups$resolve_to_ensg(perturb_ids)
 
-# ── 对每个扰动基因算相关性 ──
+# ── 对每个 target gene 算相关性 ──
 shet_sub <- shet_df[shet_df$ensg %in% posterior_df$ensg, ]
-n_genes  <- length(perturb_genes)
+n_targets <- nrow(limma_mat)
 
-corr_list <- lapply(seq_len(n_genes), function(i) {
-  target_gene <- perturb_genes[i]
-  pb <- limma_mat[, i]  # perturb_beta 向量（基因名索引）
+corr_list <- lapply(seq_len(n_targets), function(i) {
+  pb <- limma_mat[i, ]  # perturb_beta 向量（扰动基因索引）
   pb_df <- data.frame(
-    gene         = names(pb),
+    gene         = perturb_ids,
     perturb_beta = as.numeric(pb),
     stringsAsFactors = FALSE
   )
-  pb_df$ensg <- ensg_lookup[pb_df$gene]
+  pb_df$ensg <- perturb_ensg
 
   df <- merge(pb_df, posterior_df[, c("ensg", "post_mean")], by = "ensg", all = FALSE)
-  df <- df[!is.na(df$post_mean) & !is.na(df$perturb_beta), ]
-  df <- df[df$ensg != ensg_lookup[target_gene], ]  # 去掉靶基因本身
+  df <- df[!is.na(df$ensg) & !is.na(df$post_mean) & !is.na(df$perturb_beta), ]
+  if (!is.na(target_ensg[i])) {
+    df <- df[df$ensg != target_ensg[i], ]  # 去掉靶基因本身
+  }
   df <- merge(df, shet_sub, by = "ensg", all = FALSE)
   if (nrow(df) < 10) return(NULL)
+  if (stats::sd(df$post_mean, na.rm = TRUE) == 0 || stats::sd(df$perturb_beta, na.rm = TRUE) == 0) {
+    return(NULL)
+  }
 
   df$post_mean_sc   <- scale(df$post_mean)
   df$perturb_beta_sc <- scale(df$perturb_beta)
 
-  fit <- lm(post_mean_sc ~ perturb_beta_sc + shet, data = df)
+  fit <- tryCatch(lm(post_mean_sc ~ perturb_beta_sc + shet, data = df), error = function(e) NULL)
+  if (is.null(fit)) return(NULL)
   sm  <- summary(fit)$coefficients
+  if (!"perturb_beta_sc" %in% row.names(sm)) return(NULL)
   ct  <- tryCatch(cor.test(df$perturb_beta, df$post_mean, method = "pearson"),
                   error = function(e) list(p.value = NA, estimate = NA, conf.int = c(NA, NA)))
 
   data.frame(
-    ensg                 = ensg_lookup[target_gene],
-    P_withShet           = sm[2, 4],
-    beta_withShet        = sm[2, 1],
-    betaSE_withShet      = sm[2, 2],
+    ensg                 = target_ensg[i],
+    P_withShet           = sm["perturb_beta_sc", 4],
+    beta_withShet        = sm["perturb_beta_sc", 1],
+    betaSE_withShet      = sm["perturb_beta_sc", 2],
     P_pearson            = ct$p.value,
     R_pearson            = ct$estimate,
     R_pearson_CIlower    = ct$conf.int[1],
@@ -87,10 +97,31 @@ corr_list <- lapply(seq_len(n_genes), function(i) {
 
 correlation_df <- do.call(rbind, corr_list[!vapply(corr_list, is.null, logical(1))])
 if (is.null(correlation_df) || nrow(correlation_df) == 0) {
-  stop("No perturb genes produced valid correlation results")
+  unresolved_targets <- unique(target_ids[is.na(target_ensg)])
+  unresolved_perturb <- unique(perturb_ids[is.na(perturb_ensg)])
+  stop(sprintf(
+    paste(
+      "No gene-level scatter points produced valid correlation results",
+      "(limma rows=%d, resolved target ENSG=%d, perturb columns=%d, resolved perturb ENSG=%d, posterior genes=%d, shet genes=%d).",
+      "Example unresolved target IDs: %s.",
+      "Example unresolved perturb IDs: %s."
+    ),
+    length(target_ids),
+    sum(!is.na(target_ensg)),
+    length(perturb_ids),
+    sum(!is.na(perturb_ensg)),
+    length(unique(posterior_df$ensg)),
+    length(unique(shet_sub$ensg)),
+    if (length(unresolved_targets) > 0) paste(head(unresolved_targets, 5), collapse = ", ") else "none",
+    if (length(unresolved_perturb) > 0) paste(head(unresolved_perturb, 5), collapse = ", ") else "none"
+  ))
 }
 
 # ── 合并 posterior + correlation ──
+correlation_df <- correlation_df[!is.na(correlation_df$ensg) & nzchar(correlation_df$ensg), , drop = FALSE]
+if (nrow(correlation_df) == 0) {
+  stop("No scatter rows remained after ENSG resolution")
+}
 df <- merge(correlation_df, posterior_df[, c("ensg", "post_mean")], by = "ensg", all = FALSE)
 df$gene <- gene_lookup[df$ensg]
 df$gene[is.na(df$gene)] <- df$ensg[is.na(df$gene)]
