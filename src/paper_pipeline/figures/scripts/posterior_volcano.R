@@ -1,6 +1,6 @@
 args <- commandArgs(trailingOnly = TRUE)
 
-burden_path <- as.character(args[1])
+posterior_path <- as.character(args[1])
 gene_map_path <- as.character(args[2])
 geneset_dir <- as.character(args[3])
 highlight_genesets_raw <- if (length(args) >= 4) as.character(args[4]) else ""
@@ -23,51 +23,41 @@ source(file.path(script_dir, "helpers.R"))
 
 highlight_genesets <- trimws(strsplit(highlight_genesets_raw, ",", fixed = TRUE)[[1]])
 highlight_genesets <- highlight_genesets[nzchar(highlight_genesets)]
-
-lof <- data.table::fread(burden_path, data.table = FALSE)
-required_columns <- c("beta", "standard_error", "ensg")
-missing_columns <- setdiff(required_columns, names(lof))
-if (length(missing_columns) > 0) {
-  stop(sprintf("Burden file %s is missing columns: %s", burden_path, paste(missing_columns, collapse = ", ")))
-}
-
-lof <- data.frame(
-  lof,
-  P = 2 * pnorm(-abs(lof$beta / lof$standard_error)),
-  stringsAsFactors = FALSE
-)
-
-df <- lof[, c("beta", "P", "ensg")]
-df$FDR <- p.adjust(df$P, method = "BH")
-df$LABEL <- label_from_ensg(df$ensg, gene_map_path)
-
-# 画图着色：只用 highlight_genesets（默认4个）
-df$geneset_color <- "other"
-for (geneset_name in rev(highlight_genesets)) {
-  members <- read_geneset_members(geneset_dir, geneset_name)
-  mask <- df$LABEL %in% members
-  df$geneset_color[mask] <- friendly_geneset_name(geneset_name)
-}
-
-# 数据记录：用 data_genesets（全部54个），累积全部匹配
 data_genesets <- if (nzchar(data_genesets_raw)) {
   sets <- trimws(strsplit(data_genesets_raw, ",", fixed = TRUE)[[1]])
   sets[nzchar(sets)]
 } else {
   character()
 }
-df$geneset <- ""
-for (geneset_name in rev(data_genesets)) {
+
+posterior <- data.table::fread(posterior_path, data.table = FALSE)
+required_columns <- c("ensg", "post_mean", "post2_mean", "lower_95", "upper_95")
+missing_columns <- setdiff(required_columns, names(posterior))
+if (length(missing_columns) > 0) {
+  stop(sprintf("Posterior file %s is missing columns: %s", posterior_path, paste(missing_columns, collapse = ", ")))
+}
+
+posterior <- posterior[!is.na(posterior$post_mean) & !is.na(posterior$post2_mean), , drop = FALSE]
+posterior$posterior_var <- pmax(posterior$post2_mean - posterior$post_mean^2, 0)
+posterior$posterior_sd <- sqrt(posterior$posterior_var)
+posterior$z <- ifelse(posterior$posterior_sd > 0, posterior$post_mean / posterior$posterior_sd, NA_real_)
+posterior$P <- ifelse(
+  !is.na(posterior$z),
+  2 * pnorm(-abs(posterior$z)),
+  NA_real_
+)
+posterior$P[is.na(posterior$P)] <- 1
+
+df <- posterior[, c("ensg", "post_mean", "posterior_sd", "P", "lower_95", "upper_95"), drop = FALSE]
+df$FDR <- p.adjust(df$P, method = "BH")
+df$LABEL <- label_from_ensg(df$ensg, gene_map_path)
+
+df$geneset_color <- "other"
+for (geneset_name in rev(highlight_genesets)) {
   members <- read_geneset_members(geneset_dir, geneset_name)
   mask <- df$LABEL %in% members
-  display <- friendly_geneset_name(geneset_name)
-  df$geneset[mask] <- ifelse(
-    nchar(df$geneset[mask]) == 0,
-    display,
-    paste(df$geneset[mask], display, sep = ";")
-  )
+  df$geneset_color[mask] <- friendly_geneset_name(geneset_name)
 }
-df$geneset[df$geneset == ""] <- "other"
 
 feature_annotations <- annotate_gene_features(
   genes = df$LABEL,
@@ -78,14 +68,14 @@ feature_annotations <- annotate_gene_features(
   k = as.integer(program_k),
   top_n_program_genes = as.integer(top_n_program_genes)
 )
-df$program <- feature_annotations$program
 df$geneset <- feature_annotations$geneset
+df$program <- feature_annotations$program
 df$geneset[df$geneset == ""] <- "other"
 df$program[df$program == ""] <- "other"
 
 df$label <- ifelse(df$geneset_color != "other" & df$FDR <= label_fdr_threshold, df$LABEL, "")
-
 df$neg_log10_p <- -log10(pmax(df$P, .Machine$double.xmin))
+
 line_candidates <- df$P[df$FDR <= line_fdr_threshold]
 threshold_y <- if (length(line_candidates) > 0) {
   -log10(max(line_candidates))
@@ -96,7 +86,10 @@ threshold_y <- if (length(line_candidates) > 0) {
 genes_export <- data.frame(
   ensg = df$ensg,
   gene = df$LABEL,
-  beta = df$beta,
+  post_mean = df$post_mean,
+  posterior_sd = df$posterior_sd,
+  lower_95 = df$lower_95,
+  upper_95 = df$upper_95,
   p = df$P,
   logp = df$neg_log10_p,
   fdr = df$FDR,
@@ -109,7 +102,10 @@ hits_df <- df[df$FDR <= line_fdr_threshold, , drop = FALSE]
 hits_export <- data.frame(
   ensg = hits_df$ensg,
   gene = hits_df$LABEL,
-  beta = hits_df$beta,
+  post_mean = hits_df$post_mean,
+  posterior_sd = hits_df$posterior_sd,
+  lower_95 = hits_df$lower_95,
+  upper_95 = hits_df$upper_95,
   p = hits_df$P,
   logp = hits_df$neg_log10_p,
   fdr = hits_df$FDR,
@@ -135,13 +131,17 @@ library(ggplot2)
 library(ggrepel)
 
 palette_values <- c("other" = "grey70")
-for (i in seq_along(unique(df$geneset_color[df$geneset_color != "other"]))) {
-  palette_values[unique(df$geneset_color[df$geneset_color != "other"])[i]] <- c("#1F77B4", "#D62728", "#2CA02C", "#FF7F0E", "#9467BD")[((i - 1) %% 5) + 1]
+highlight_levels <- unique(df$geneset_color[df$geneset_color != "other"])
+if (length(highlight_levels) > 0) {
+  colors <- c("#1F77B4", "#D62728", "#2CA02C", "#FF7F0E", "#9467BD")
+  for (i in seq_along(highlight_levels)) {
+    palette_values[highlight_levels[i]] <- colors[((i - 1) %% length(colors)) + 1]
+  }
 }
 
 highlight_df <- df[df$geneset_color != "other" & df$FDR <= line_fdr_threshold, , drop = FALSE]
 
-g <- ggplot(df, aes(x = beta, y = neg_log10_p, color = geneset_color))
+g <- ggplot(df, aes(x = post_mean, y = neg_log10_p, color = geneset_color))
 g <- g + theme_classic(base_size = 20, base_family = "Helvetica")
 g <- g + geom_point(alpha = 0.45, size = 2.5)
 if (nrow(highlight_df) > 0) {
@@ -159,7 +159,7 @@ if (!is.na(threshold_y)) {
 }
 g <- g + scale_color_manual(values = palette_values)
 g <- g + theme(legend.title = element_blank())
-g <- g + xlab("Effect size")
+g <- g + xlab("Posterior effect size")
 g <- g + ylab("-log10(P)")
 
 ggsave(plot = g, filename = paste0(plot_prefix, ".pdf"), width = 14, height = 12, dpi = 300)

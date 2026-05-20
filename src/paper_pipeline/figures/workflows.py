@@ -76,12 +76,15 @@ class ResolvedFiguresBurdenVolcano:
     config: LoadedConfig
     geneset_dir: Path
     gene_map: Path
+    spectra_path: Path
     output_dir: Path
     targets: tuple[FileTarget, ...]
     highlight_genesets: tuple[str, ...]
     data_genesets: tuple[str, ...]
     label_fdr_threshold: float
     line_fdr_threshold: float
+    k: int
+    top_n_program_genes: int
 
 
 @dataclass(frozen=True)
@@ -98,6 +101,22 @@ class ResolvedFiguresGwasManhattan:
     flank_bp: int
     label_p_threshold: float
     genomewide_threshold: float
+    k: int
+    top_n_program_genes: int
+
+
+@dataclass(frozen=True)
+class ResolvedFiguresPosteriorVolcano:
+    config: LoadedConfig
+    geneset_dir: Path
+    gene_map: Path
+    spectra_path: Path
+    output_dir: Path
+    targets: tuple[GeneLevelScatterTarget, ...]
+    highlight_genesets: tuple[str, ...]
+    data_genesets: tuple[str, ...]
+    label_fdr_threshold: float
+    line_fdr_threshold: float
     k: int
     top_n_program_genes: int
 
@@ -562,18 +581,103 @@ def _resolve_figures_burden_volcano(config: LoadedConfig) -> ResolvedFiguresBurd
         parameters.get("data_genesets"),
         "workflows.figures.burden_volcano.parameters.data_genesets",
     ) or highlight_genesets
+    k = int(parameters.get("k", 60))
 
     return ResolvedFiguresBurdenVolcano(
         config=config,
         geneset_dir=config.resolve_path(inputs.get("geneset_dir")) or config.project_root / "data" / "geneset",
         gene_map=config.resolve_path(inputs.get("gene_map"))
         or config.project_root / "data" / "gencode_v41_gname_gid_ALL_sorted_onlyID",
+        spectra_path=config.resolve_path(inputs.get("spectra_path"))
+        or config.resolve_path_or_artifact(
+            inputs.get("spectra_path"),
+            "perturbseq",
+            "cnmf_genomewide",
+            "cNMF",
+            "cNMF_all",
+            f"cNMF_all.gene_spectra_score.k_{k}.dt_0_5.txt",
+        ),
         output_dir=config.resolve_path_or_artifact(outputs.get("output_dir"), "burden_volcano"),
         targets=targets,
         highlight_genesets=highlight_genesets,
         data_genesets=data_genesets,
         label_fdr_threshold=float(parameters.get("label_fdr_threshold", 0.01)),
         line_fdr_threshold=float(parameters.get("line_fdr_threshold", 0.1)),
+        k=k,
+        top_n_program_genes=int(parameters.get("top_n_program_genes", 100)),
+    )
+
+
+def _resolve_figures_posterior_volcano(config: LoadedConfig) -> ResolvedFiguresPosteriorVolcano:
+    workflow = _workflow_mapping(config, "posterior_volcano")
+    inputs = _validate_mapping(workflow.get("inputs"), "workflows.figures.posterior_volcano.inputs")
+    outputs = _validate_mapping(workflow.get("outputs"), "workflows.figures.posterior_volcano.outputs")
+    parameters = _validate_mapping(workflow.get("parameters"), "workflows.figures.posterior_volcano.parameters")
+
+    mapping_entries = _load_file_id_map(config, inputs.get("file_id_map"))
+    lof_ids = _string_list(parameters.get("lof_ids"), "workflows.figures.posterior_volcano.parameters.lof_ids")
+    if not lof_ids:
+        raise ConfigError("workflows.figures.posterior_volcano.parameters.lof_ids must not be empty")
+    if not mapping_entries:
+        raise ConfigError("workflows.figures.posterior_volcano.inputs.file_id_map is required")
+
+    id_lookup = _mapping_entries_by_id(mapping_entries, id_field="id2")
+    posterior_dir = config.resolve_path_or_artifact(inputs.get("posterior_dir"), "genebayes", "posterior")
+    posterior_name_map = _load_two_column_name_map(
+        config,
+        inputs.get("posterior_name_map"),
+        label="workflows.figures.posterior_volcano.inputs.posterior_name_map",
+    )
+
+    targets: list[GeneLevelScatterTarget] = []
+    for source_id in lof_ids:
+        entry = id_lookup.get(source_id)
+        if entry is None:
+            raise ConfigError(
+                f"workflows.figures.posterior_volcano.parameters.lof_ids value '{source_id}' "
+                "was not found in file_id_map column id2"
+            )
+        trait_stem = _file_label(str(entry.path2))
+        targets.append(
+            GeneLevelScatterTarget(
+                source_id=_normalize_output_id(source_id, "workflows.figures.posterior_volcano.parameters.lof_ids"),
+                trait_stem=trait_stem,
+                posterior_path=posterior_dir / _posterior_filename_for_entry(entry, posterior_name_map),
+            )
+        )
+
+    highlight_genesets = _string_list(
+        parameters.get("highlight_genesets"),
+        "workflows.figures.posterior_volcano.parameters.highlight_genesets",
+    ) or DEFAULT_HIGHLIGHT_GENESETS
+    data_genesets = _string_list(
+        parameters.get("data_genesets"),
+        "workflows.figures.posterior_volcano.parameters.data_genesets",
+    ) or highlight_genesets
+    k = int(parameters.get("k", 60))
+
+    return ResolvedFiguresPosteriorVolcano(
+        config=config,
+        geneset_dir=config.resolve_path(inputs.get("geneset_dir")) or config.project_root / "data" / "geneset",
+        gene_map=config.resolve_path(inputs.get("gene_map"))
+        or config.project_root / "data" / "gencode_v41_gname_gid_ALL_sorted_onlyID",
+        spectra_path=config.resolve_path(inputs.get("spectra_path"))
+        or config.resolve_path_or_artifact(
+            inputs.get("spectra_path"),
+            "perturbseq",
+            "cnmf_genomewide",
+            "cNMF",
+            "cNMF_all",
+            f"cNMF_all.gene_spectra_score.k_{k}.dt_0_5.txt",
+        ),
+        output_dir=config.resolve_path_or_artifact(outputs.get("output_dir"), "posterior_volcano"),
+        targets=tuple(targets),
+        highlight_genesets=highlight_genesets,
+        data_genesets=data_genesets,
+        label_fdr_threshold=float(parameters.get("label_fdr_threshold", 0.01)),
+        line_fdr_threshold=float(parameters.get("line_fdr_threshold", 0.1)),
+        k=k,
+        top_n_program_genes=int(parameters.get("top_n_program_genes", 100)),
     )
 
 
@@ -1285,7 +1389,8 @@ def build_figures_burden_volcano_tasks(config: LoadedConfig) -> list[Task]:
     manifest_rows: list[dict[str, str]] = []
 
     for target in resolved.targets:
-        table_path = tables_dir / f"{target.source_id}.tsv"
+        genes_path = tables_dir / f"{target.source_id}_genes.tsv"
+        hits_path = tables_dir / f"{target.source_id}_hits.tsv"
         plot_prefix = plots_dir / target.source_id
         command = _rscript_command(
             config,
@@ -1294,11 +1399,14 @@ def build_figures_burden_volcano_tasks(config: LoadedConfig) -> list[Task]:
             resolved.gene_map,
             resolved.geneset_dir,
             geneset_arg,
-            table_path,
+            genes_path,
             plot_prefix,
             resolved.label_fdr_threshold,
             resolved.line_fdr_threshold,
             data_geneset_arg,
+            resolved.spectra_path,
+            resolved.k,
+            resolved.top_n_program_genes,
         )
         tasks.append(
             Task(
@@ -1313,13 +1421,74 @@ def build_figures_burden_volcano_tasks(config: LoadedConfig) -> list[Task]:
                 "figure_kind": "burden_volcano",
                 "source_id": target.source_id,
                 "source_path": str(target.source_path),
-                "table_path": str(table_path),
+                "table_path": str(genes_path),
+                "genes_path": str(genes_path),
+                "hits_path": str(hits_path),
                 "plot_pdf": str(plot_prefix.with_suffix(".pdf")),
                 "plot_png": str(plot_prefix.with_suffix(".png")),
             }
         )
 
     tasks.append(_write_manifest_task(meta_dir / "manifest.tsv", manifest_rows, "figures-burden-volcano"))
+    return tasks
+
+
+def build_figures_posterior_volcano_tasks(config: LoadedConfig) -> list[Task]:
+    resolved = _resolve_figures_posterior_volcano(config)
+    tables_dir = resolved.output_dir / "tables"
+    plots_dir = resolved.output_dir / "plots"
+    meta_dir = resolved.output_dir / "meta"
+    tasks: list[Task] = [
+        _ensure_directory_task(tables_dir, "figures-posterior-volcano tables"),
+        _ensure_directory_task(plots_dir, "figures-posterior-volcano plots"),
+        _ensure_directory_task(meta_dir, "figures-posterior-volcano meta"),
+    ]
+    geneset_arg = ",".join(resolved.highlight_genesets)
+    data_geneset_arg = ",".join(resolved.data_genesets)
+    manifest_rows: list[dict[str, str]] = []
+
+    for target in resolved.targets:
+        genes_path = tables_dir / f"{target.source_id}_genes.tsv"
+        hits_path = tables_dir / f"{target.source_id}_hits.tsv"
+        plot_prefix = plots_dir / target.source_id
+        command = _rscript_command(
+            config,
+            "posterior_volcano.R",
+            target.posterior_path,
+            resolved.gene_map,
+            resolved.geneset_dir,
+            geneset_arg,
+            genes_path,
+            plot_prefix,
+            resolved.label_fdr_threshold,
+            resolved.line_fdr_threshold,
+            data_geneset_arg,
+            resolved.spectra_path,
+            resolved.k,
+            resolved.top_n_program_genes,
+        )
+        tasks.append(
+            Task(
+                name=f"Render figures-posterior-volcano for {target.source_id}",
+                preview=preview_command(command),
+                command=command,
+            )
+        )
+        manifest_rows.append(
+            {
+                "figure_id": target.source_id,
+                "figure_kind": "posterior_volcano",
+                "source_id": target.source_id,
+                "posterior_path": str(target.posterior_path),
+                "table_path": str(genes_path),
+                "genes_path": str(genes_path),
+                "hits_path": str(hits_path),
+                "plot_pdf": str(plot_prefix.with_suffix(".pdf")),
+                "plot_png": str(plot_prefix.with_suffix(".png")),
+            }
+        )
+
+    tasks.append(_write_manifest_task(meta_dir / "manifest.tsv", manifest_rows, "figures-posterior-volcano"))
     return tasks
 
 
@@ -1907,6 +2076,9 @@ def build_figures_tasks(config: LoadedConfig) -> list[Task]:
     if figures.get("burden_volcano"):
         tasks.extend(build_figures_burden_volcano_tasks(config))
         active_kinds.append("burden_volcano")
+    if figures.get("posterior_volcano"):
+        tasks.extend(build_figures_posterior_volcano_tasks(config))
+        active_kinds.append("posterior_volcano")
     if figures.get("gwas_manhattan"):
         tasks.extend(build_figures_gwas_manhattan_tasks(config))
         active_kinds.append("gwas_manhattan")
@@ -1944,6 +2116,7 @@ def build_figures_tasks(config: LoadedConfig) -> list[Task]:
 
 __all__ = [
     "build_figures_burden_volcano_tasks",
+    "build_figures_posterior_volcano_tasks",
     "build_figures_cnmf_tasks",
     "build_figures_cross_trait_tasks",
     "build_figures_cross_trait_heatmap_tasks",

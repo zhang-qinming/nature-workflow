@@ -295,6 +295,10 @@ workflows:
       # inputs.file_id_map, geneset_dir, gene_map inherited from shared_inputs.
       parameters:
         lof_ids: [GCST90081631]
+    posterior_volcano:
+      # inputs.file_id_map, posterior_dir, posterior_name_map, geneset_dir, gene_map, spectra_path inherited from shared_inputs.
+      parameters:
+        lof_ids: [GCST90081631]
     gwas_manhattan:
       # inputs.file_id_map, gene_annotation, geneset_dir, gene_map, spectra_path inherited from shared_inputs.
       # parameters.highlight_genesets inherited from shared_parameters.

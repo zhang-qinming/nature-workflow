@@ -42,6 +42,12 @@ FIGURE_BURDEN_VOLCANO_CPUS="${FIGURE_BURDEN_VOLCANO_CPUS:-${FIGURE_DEFAULT_CPUS}
 FIGURE_BURDEN_VOLCANO_PARTITION="${FIGURE_BURDEN_VOLCANO_PARTITION:-${FIGURE_DEFAULT_PARTITION}}"
 FIGURE_BURDEN_VOLCANO_TIME="${FIGURE_BURDEN_VOLCANO_TIME:-${FIGURE_DEFAULT_TIME}}"
 
+# --- GeneBayes posterior 火山图 ---
+FIGURE_POSTERIOR_VOLCANO_MEM="${FIGURE_POSTERIOR_VOLCANO_MEM:-8G}"
+FIGURE_POSTERIOR_VOLCANO_CPUS="${FIGURE_POSTERIOR_VOLCANO_CPUS:-${FIGURE_DEFAULT_CPUS}}"
+FIGURE_POSTERIOR_VOLCANO_PARTITION="${FIGURE_POSTERIOR_VOLCANO_PARTITION:-${FIGURE_DEFAULT_PARTITION}}"
+FIGURE_POSTERIOR_VOLCANO_TIME="${FIGURE_POSTERIOR_VOLCANO_TIME:-${FIGURE_DEFAULT_TIME}}"
+
 # --- 基因级散点图 (posterior vs perturb-seq) ---
 FIGURE_GENE_LEVEL_SCATTER_MEM="${FIGURE_GENE_LEVEL_SCATTER_MEM:-8G}"
 FIGURE_GENE_LEVEL_SCATTER_CPUS="${FIGURE_GENE_LEVEL_SCATTER_CPUS:-${FIGURE_DEFAULT_CPUS}}"
@@ -129,6 +135,7 @@ FIGURE_ENABLE_CNMF="${FIGURE_ENABLE_CNMF:-1}"
 FIGURE_ENABLE_PROGRAM_RANKINGS="${FIGURE_ENABLE_PROGRAM_RANKINGS:-1}"
 FIGURE_ENABLE_PROGRAM_HEATMAP="${FIGURE_ENABLE_PROGRAM_HEATMAP:-1}"
 FIGURE_ENABLE_BURDEN_VOLCANO="${FIGURE_ENABLE_BURDEN_VOLCANO:-1}"
+FIGURE_ENABLE_POSTERIOR_VOLCANO="${FIGURE_ENABLE_POSTERIOR_VOLCANO:-1}"
 FIGURE_ENABLE_GWAS_MANHATTAN="${FIGURE_ENABLE_GWAS_MANHATTAN:-1}"
 FIGURE_ENABLE_GENE_LEVEL_SCATTER="${FIGURE_ENABLE_GENE_LEVEL_SCATTER:-1}"
 FIGURE_ENABLE_GENE_LEVEL_QQ="${FIGURE_ENABLE_GENE_LEVEL_QQ:-1}"
@@ -624,6 +631,17 @@ ${GENESETS_YAML}
 YAML_EOF
 }
 
+append_posterior_volcano_section() {
+    local config_path="$1" lof_id="$2"
+    cat >> "${config_path}" <<YAML_EOF
+    posterior_volcano:
+      parameters:
+        lof_ids: [$(yaml_quote "${lof_id}")]
+        highlight_genesets:
+${GENESETS_YAML}
+YAML_EOF
+}
+
 # ============================================================
 # Worker 函数：脚本自调用模式，避免 export -f 传递大量函数
 # ============================================================
@@ -641,6 +659,9 @@ _fig_gen_one_lof() {
     fi
     if is_truthy "${FIGURE_ENABLE_BURDEN_VOLCANO}"; then
         append_burden_volcano_section "${config_path}" "${lof_id}"
+    fi
+    if is_truthy "${FIGURE_ENABLE_POSTERIOR_VOLCANO}"; then
+        append_posterior_volcano_section "${config_path}" "${lof_id}"
     fi
     if is_truthy "${FIGURE_ENABLE_GENE_LEVEL_SCATTER}"; then
         append_gene_level_scatter_section "${config_path}" "${lof_id}"
@@ -665,6 +686,13 @@ _fig_gen_one_lof() {
             "${FIGURE_BURDEN_VOLCANO_MEM}" "${FIGURE_BURDEN_VOLCANO_CPUS}" \
             "${FIGURE_BURDEN_VOLCANO_PARTITION}" "${FIGURE_BURDEN_VOLCANO_TIME}" \
             "figures-burden-volcano" "${config_path}" "burden_volcano"
+    fi
+    if is_truthy "${FIGURE_ENABLE_POSTERIOR_VOLCANO}"; then
+        script_path="${lof_dir}/figures_pvolcano_${lof_id}.sh"
+        write_slurm_script "${script_path}" "fig_pvolcano_${lof_id}" \
+            "${FIGURE_POSTERIOR_VOLCANO_MEM}" "${FIGURE_POSTERIOR_VOLCANO_CPUS}" \
+            "${FIGURE_POSTERIOR_VOLCANO_PARTITION}" "${FIGURE_POSTERIOR_VOLCANO_TIME}" \
+            "figures-posterior-volcano" "${config_path}" "posterior_volcano"
     fi
     if is_truthy "${FIGURE_ENABLE_GENE_LEVEL_SCATTER}"; then
         script_path="${lof_dir}/figures_gscatter_${lof_id}.sh"

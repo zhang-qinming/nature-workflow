@@ -32,6 +32,7 @@ from .dataprep.workflows import (
 )
 from .figures.workflows import (
     build_figures_burden_volcano_tasks,
+    build_figures_posterior_volcano_tasks,
     build_figures_cnmf_program_enrichment_tasks,
     build_figures_cnmf_program_top_genes_tasks,
     build_figures_cnmf_tasks,
@@ -92,6 +93,7 @@ WORKFLOW_BUILDERS: dict[str, WorkflowBuilder] = {
     "figures-cnmf-program-top-genes": build_figures_cnmf_program_top_genes_tasks,
     "figures-cnmf-program-enrichment": build_figures_cnmf_program_enrichment_tasks,
     "figures-burden-volcano": build_figures_burden_volcano_tasks,
+    "figures-posterior-volcano": build_figures_posterior_volcano_tasks,
     "figures-cross-trait": build_figures_cross_trait_tasks,
     "figures-cross-trait-heatmap": build_figures_cross_trait_heatmap_tasks,
     "figures-gene-level-qq": build_figures_gene_level_qq_tasks,

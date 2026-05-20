@@ -113,6 +113,130 @@ label_from_ensg <- function(ensg, gene_map_path) {
   unname(labels)
 }
 
+read_program_gene_membership <- function(spectra_path, gene_map_path, k = 60, top_n = 100) {
+  spectra_raw <- data.table::fread(spectra_path, data.table = FALSE)
+  if (ncol(spectra_raw) < 1) {
+    stop(sprintf("cNMF spectra at %s is empty", spectra_path))
+  }
+
+  if (is.character(spectra_raw[[1]])) {
+    row.names(spectra_raw) <- spectra_raw[[1]]
+    spectra_raw <- spectra_raw[, -1, drop = FALSE]
+  }
+  spectra_mat <- t(as.matrix(spectra_raw))
+  if (ncol(spectra_mat) == 0) {
+    return(data.frame(program = character(), gene = character(), stringsAsFactors = FALSE))
+  }
+
+  program_count <- min(as.integer(k), ncol(spectra_mat))
+  colnames(spectra_mat) <- paste0("P", seq_len(ncol(spectra_mat)))
+
+  gene_map <- read_gene_map(gene_map_path)
+  gene_lookup <- stats::setNames(gene_map$gene, gene_map$ensg)
+  gene_symbols <- unname(gene_lookup[row.names(spectra_mat)])
+  missing_gene <- is.na(gene_symbols) | !nzchar(gene_symbols)
+  gene_symbols[missing_gene] <- row.names(spectra_mat)[missing_gene]
+
+  rows <- list()
+  for (program_index in seq_len(program_count)) {
+    program_name <- paste0("P", program_index)
+    program_df <- data.frame(
+      gene = gene_symbols,
+      weight = as.numeric(spectra_mat[, program_index]),
+      stringsAsFactors = FALSE
+    )
+    program_df <- program_df[order(program_df$weight, decreasing = TRUE, na.last = NA), , drop = FALSE]
+    program_df <- program_df[nzchar(program_df$gene) & !duplicated(program_df$gene), , drop = FALSE]
+    if (nrow(program_df) == 0) {
+      next
+    }
+
+    top_genes <- head(program_df$gene, as.integer(top_n))
+    rows[[length(rows) + 1]] <- data.frame(
+      program = program_name,
+      gene = top_genes,
+      stringsAsFactors = FALSE
+    )
+  }
+
+  if (length(rows) == 0) {
+    return(data.frame(program = character(), gene = character(), stringsAsFactors = FALSE))
+  }
+  do.call(rbind, rows)
+}
+
+annotate_gene_sets <- function(genes, geneset_dir, geneset_names) {
+  genes <- as.character(genes)
+  output <- rep("", length(genes))
+  if (length(geneset_names) == 0 || length(genes) == 0) {
+    return(output)
+  }
+
+  for (geneset_name in rev(geneset_names)) {
+    members <- read_geneset_members(geneset_dir, geneset_name)
+    display_name <- friendly_geneset_name(geneset_name)
+    mask <- genes %in% members
+    if (!any(mask)) {
+      next
+    }
+    output[mask] <- ifelse(
+      nchar(output[mask]) == 0,
+      display_name,
+      paste(output[mask], display_name, sep = ";")
+    )
+  }
+
+  output
+}
+
+annotate_programs <- function(genes, spectra_path, gene_map_path, k = 60, top_n = 100) {
+  genes <- as.character(genes)
+  output <- rep("", length(genes))
+  if (length(genes) == 0) {
+    return(output)
+  }
+  if (!nzchar(spectra_path) || !nzchar(gene_map_path) || !file.exists(spectra_path) || !file.exists(gene_map_path)) {
+    return(output)
+  }
+
+  lookup <- read_program_membership_lookup(
+    spectra_path = spectra_path,
+    gene_map_path = gene_map_path,
+    k = as.integer(k),
+    top_n = as.integer(top_n)
+  )
+  values <- unname(lookup[genes])
+  values[is.na(values)] <- ""
+  values
+}
+
+annotate_gene_features <- function(
+  genes,
+  geneset_dir,
+  geneset_names = character(),
+  spectra_path = "",
+  gene_map_path = "",
+  k = 60,
+  top_n_program_genes = 100
+) {
+  gene_labels <- as.character(genes)
+  genesets <- annotate_gene_sets(gene_labels, geneset_dir, geneset_names)
+  programs <- annotate_programs(
+    gene_labels,
+    spectra_path = spectra_path,
+    gene_map_path = gene_map_path,
+    k = as.integer(k),
+    top_n = as.integer(top_n_program_genes)
+  )
+
+  data.frame(
+    gene = gene_labels,
+    geneset = genesets,
+    program = programs,
+    stringsAsFactors = FALSE
+  )
+}
+
 parse_variant_table <- function(gwas) {
   # auto-detect column names (case-insensitive match)
   nms <- names(gwas)
