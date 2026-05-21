@@ -23,7 +23,7 @@ printf 'dataset\ttraits_in_map\texpected_files\tactual_files\n'
 printf 'cnmf_essential\t%s\t%s\t%s\n' "${map_traits}" "${expected_files_per_dataset}" "${essential_actual_files}"
 printf 'cnmf_genomewide\t%s\t%s\t%s\n' "${map_traits}" "${expected_files_per_dataset}" "${genomewide_actual_files}"
 printf '\nmissing_files\n'
-printf 'dataset\tid2\ttrait_file\tmissing_programs\tmissing_regulators\n'
+printf 'dataset\tid2\ttrait_file\tmissing_programs\tmissing_regulators\tmissing_outputs\n'
 
 total_missing=0
 essential_missing=0
@@ -80,12 +80,25 @@ while IFS=$'\t' read -r id1 id2 path1 path2; do
         fi
 
         if [ "${missing_programs}" -ne 0 ] || [ "${missing_regulators}" -ne 0 ]; then
-            printf '%s\t%s\t%s\t%s\t%s\n' \
+            missing_outputs=""
+            if [ "${missing_programs}" -ne 0 ]; then
+                missing_outputs="programs"
+            fi
+            if [ "${missing_regulators}" -ne 0 ]; then
+                if [ -n "${missing_outputs}" ]; then
+                    missing_outputs="${missing_outputs},regulators"
+                else
+                    missing_outputs="regulators"
+                fi
+            fi
+
+            printf '%s\t%s\t%s\tprograms=%s\tregulators=%s\t%s\n' \
                 "${dataset}" \
                 "${id2}" \
                 "${trait_file}" \
                 "${missing_programs}" \
-                "${missing_regulators}"
+                "${missing_regulators}" \
+                "${missing_outputs}"
 
             total_missing=$((total_missing + 1))
             if [ "${dataset}" = "cnmf_essential" ]; then
