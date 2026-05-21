@@ -512,10 +512,14 @@ def _resolve_figures_cnmf(config: LoadedConfig) -> ResolvedFiguresCnmf:
         parameters.get("plot_label_programs"),
         "workflows.figures.cnmf.parameters.plot_label_programs",
     ) or (4, 16, 25, 40)
-    corregulation_pairs_raw = _mapping_list(
-        parameters.get("corregulation_pairs"),
-        "workflows.figures.cnmf.parameters.corregulation_pairs",
-    ) or ({"program_a": "P25", "program_b": "P16"},)
+    corregulation_pairs_value = parameters.get("corregulation_pairs")
+    if corregulation_pairs_value is None:
+        corregulation_pairs_raw = ({"program_a": "P25", "program_b": "P16"},)
+    else:
+        corregulation_pairs_raw = _mapping_list(
+            corregulation_pairs_value,
+            "workflows.figures.cnmf.parameters.corregulation_pairs",
+        )
 
     pairs: list[CorregulationTarget] = []
     for index, pair in enumerate(corregulation_pairs_raw, start=1):

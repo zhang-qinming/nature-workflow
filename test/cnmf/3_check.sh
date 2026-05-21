@@ -6,11 +6,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${PROJECT_ROOT:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 FILE_ID_MAP="${FILE_ID_MAP:-${PROJECT_ROOT}/configs/path.file_id_map.tsv}"
 
-TASK_NAME="${TASK_NAME:-trait_program_gene_panel}"
-JOB_NAME="${JOB_NAME:-tpgp}"
+TASK_NAME="${TASK_NAME:-cnmf}"
+JOB_NAME="${JOB_NAME:-cnmf}"
 
 OUTPUT_ROOT="${OUTPUT_ROOT:-/gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all/outputs}"
-OUTPUT_DIR="${OUTPUT_DIR:-${OUTPUT_ROOT}/trait_program_gene_panel}"
+OUTPUT_DIR="${OUTPUT_DIR:-${OUTPUT_ROOT}/cnmf}"
 RUN_ROOT="${RUN_ROOT:-${OUTPUT_ROOT}/${TASK_NAME}}"
 STATUS_DIR="${STATUS_DIR:-${RUN_ROOT}/status}"
 FAILURE_DIR="${FAILURE_DIR:-${RUN_ROOT}/failed}"
@@ -25,10 +25,8 @@ ok=0
 failed=0
 running=0
 stale=0
-pdf=0
-png=0
-table_long=0
-table_program=0
+table_program_reg=0
+plot_program_reg=0
 failed_files=()
 stale_ids=()
 reconciled_stale=0
@@ -70,10 +68,8 @@ for source_id in "${ALL_IDS[@]}"; do
         fi
     fi
 
-    [ -f "${OUTPUT_DIR}/tables/${source_id}_long.tsv" ] && ((table_long++)) || true
-    [ -f "${OUTPUT_DIR}/tables/${source_id}_programs.tsv" ] && ((table_program++)) || true
-    [ -f "${OUTPUT_DIR}/plots/${source_id}.pdf" ] && ((pdf++)) || true
-    [ -f "${OUTPUT_DIR}/plots/${source_id}.png" ] && ((png++)) || true
+    [ -f "${OUTPUT_DIR}/tables/program_regulator/${source_id}.tsv" ] && ((table_program_reg++)) || true
+    [ -f "${OUTPUT_DIR}/plots/program_regulator/${source_id}.pdf" ] && ((plot_program_reg++)) || true
 done
 
 processed=$((ok + failed + running + stale))
@@ -85,8 +81,17 @@ if command -v squeue >/dev/null 2>&1; then
     r_count="$(squeue -u "${USER}" -h -t R -n "${JOB_NAME}" 2>/dev/null | wc -l)"
 fi
 
+cor_table_count=0
+cor_plot_count=0
+if [ -d "${OUTPUT_DIR}/tables/corregulation" ]; then
+    cor_table_count="$(find "${OUTPUT_DIR}/tables/corregulation" -maxdepth 1 -type f -name '*.tsv' | wc -l)"
+fi
+if [ -d "${OUTPUT_DIR}/plots/corregulation" ]; then
+    cor_plot_count="$(find "${OUTPUT_DIR}/plots/corregulation" -maxdepth 1 -type f -name '*.pdf' | wc -l)"
+fi
+
 echo "============================================"
-echo "Trait-program-gene panel status"
+echo "cNMF figure status"
 echo "============================================"
 echo "Task name: ${TASK_NAME}"
 echo "Job name:  ${JOB_NAME}"
@@ -100,10 +105,10 @@ echo "Pending:   ${pending}"
 echo "PD queue:  ${pd_count}"
 echo "R queue:   ${r_count}"
 echo ""
-echo "Long TSV:     ${table_long}"
-echo "Programs TSV: ${table_program}"
-echo "PDF:          ${pdf}"
-echo "PNG:          ${png}"
+echo "Program-regulator TSV: ${table_program_reg}"
+echo "Program-regulator PDF: ${plot_program_reg}"
+echo "Corregulation TSV:     ${cor_table_count}"
+echo "Corregulation PDF:     ${cor_plot_count}"
 
 if [ "${failed}" -gt 0 ]; then
     echo ""

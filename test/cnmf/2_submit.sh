@@ -5,11 +5,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${PROJECT_ROOT:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 
-TASK_NAME="${TASK_NAME:-trait_program_gene_panel}"
-JOB_NAME="${JOB_NAME:-tpgp}"
+TASK_NAME="${TASK_NAME:-cnmf}"
+JOB_NAME="${JOB_NAME:-cnmf}"
 
 OUTPUT_ROOT="${OUTPUT_ROOT:-/gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all/outputs}"
-OUTPUT_DIR="${OUTPUT_DIR:-${OUTPUT_ROOT}/trait_program_gene_panel}"
+OUTPUT_DIR="${OUTPUT_DIR:-${OUTPUT_ROOT}/cnmf}"
 RUN_ROOT="${RUN_ROOT:-${OUTPUT_ROOT}/${TASK_NAME}}"
 BATCH_ROOT="${BATCH_ROOT:-/gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all/scripts/${TASK_NAME}}"
 
@@ -27,7 +27,7 @@ mkdir -p "${STATUS_DIR}" "${LOGS_DIR}" "${FAILURE_DIR}"
 
 if [ ! -f "${MANIFEST_PATH}" ]; then
     echo "Manifest not found: ${MANIFEST_PATH}" >&2
-    echo "Run: bash test/trait_program_gene_panel/1_generate.sh" >&2
+    echo "Run: bash test/cnmf/1_generate.sh" >&2
     exit 1
 fi
 
@@ -119,4 +119,4 @@ echo "Job name: ${JOB_NAME}"
 echo "Submitted: ${SUBMITTED}"
 echo "Skipped: ${SKIPPED}"
 echo "Submit failed: ${FAILED_SUBMIT}"
-echo "Check: bash test/trait_program_gene_panel/3_check.sh"
+echo "Check: bash test/cnmf/3_check.sh"

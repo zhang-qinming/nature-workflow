@@ -1,0 +1,20 @@
+project_root: ../..
+artifact_root: /gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all/outputs
+
+executables:
+  plot_rscript:
+    - conda
+    - run
+    - --no-capture-output
+    - -n
+    - paper-pipeline-plot
+    - Rscript
+
+workflows:
+  figures:
+    shared_inputs:
+      file_id_map: ../../configs/path.file_id_map.tsv
+      program_association_dir: /gpfs/chencao/qinminzhang/workflow/catalog_lof/run_all/outputs/perturbseq/cnmf_genomewide/trait_association/K562GW/ProgramLevel
+      cnmf_regulation_dir: /gpfs/chencao/qinminzhang/Nature/mine/code/outputs/perturbseq/cnmf_genomewide/cNMF_regulation/K562GW
+
+    shared_parameters: {}

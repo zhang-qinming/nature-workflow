@@ -27,6 +27,103 @@ source(file.path(script_dir, "helpers.R"))
 
 options(scipen = 10)
 
+plot_enabled <- render_plot %in% c("1", "true", "TRUE", "yes", "YES")
+
+make_empty_side_hits <- function() {
+  data.frame(
+    trait_id = character(),
+    Program = character(),
+    side = character(),
+    gene = character(),
+    ensg = character(),
+    post_mean = numeric(),
+    abs_gamma = numeric(),
+    gamma_sign = character(),
+    membership_score = numeric(),
+    rank_within_side = integer(),
+    predicted_sign = numeric(),
+    post_mean_sign = numeric(),
+    is_discordant = logical(),
+    program_label = character(),
+    gene_label = character(),
+    display_rank = integer(),
+    x = numeric(),
+    y = numeric(),
+    panel_row = integer(),
+    y_global = numeric(),
+    has_overlap = logical(),
+    empty_reason = character(),
+    stringsAsFactors = FALSE
+  )
+}
+
+write_placeholder_plot <- function(program_summary, plot_prefix, trait_id, max_genes_per_side, message_text) {
+  ensure_parent_dir(paste0(plot_prefix, ".pdf"))
+  library(ggplot2)
+
+  panel_rows <- nrow(program_summary)
+  gene_text_size <- max(3.2, min(5.2, 5.8 - max_genes_per_side * 0.22))
+  plot_height <- max(5, panel_rows * 1.1 + 3.5)
+  title_y <- if (panel_rows > 0) max(program_summary$y_center) + 2 else 4
+  y_max <- if (panel_rows > 0) title_y + 1.5 else 6
+
+  g <- ggplot()
+  if (panel_rows > 0) {
+    g <- g + geom_segment(
+      data = program_summary,
+      aes(x = -0.42, xend = 0.42, y = y_center, yend = y_center),
+      linewidth = 0.4,
+      color = "grey88"
+    )
+    g <- g + geom_label(
+      data = program_summary,
+      aes(x = 0, y = y_center, label = program_label, fill = color),
+      label.size = 0.15,
+      label.padding = grid::unit(0.18, "lines"),
+      size = gene_text_size * 0.72,
+      fontface = "bold",
+      color = "black"
+    )
+  }
+
+  g <- g + annotate(
+    "text",
+    x = 0,
+    y = title_y,
+    label = trait_id,
+    hjust = 0.5,
+    fontface = "bold",
+    size = gene_text_size * 1.05
+  )
+  g <- g + annotate(
+    "text",
+    x = 0,
+    y = title_y - 1.05,
+    label = message_text,
+    hjust = 0.5,
+    size = gene_text_size * 0.78,
+    color = "grey35"
+  )
+  g <- g + scale_fill_manual(
+    values = c(
+      "other" = "#ECECEC",
+      "program_enriched" = "#F9D48B",
+      "regulator_enriched" = "#A9C7E6",
+      "both_enriched" = "#A9D6A4"
+    ),
+    drop = FALSE
+  )
+  g <- g + coord_cartesian(xlim = c(-0.82, 0.82), ylim = c(0, y_max), clip = "off")
+  g <- g + theme_void(base_family = "Helvetica")
+  g <- g + theme(
+    legend.position = "none",
+    plot.margin = margin(18, 28, 18, 28)
+  )
+
+  ggsave(plot = g, filename = paste0(plot_prefix, ".pdf"), width = 10, height = plot_height)
+  ggsave(plot = g, filename = paste0(plot_prefix, ".png"), width = 10, height = plot_height, dpi = 300)
+}
+
 posterior_df <- data.table::fread(posterior_path, data.table = FALSE)
 if (!all(c("ensg", "post_mean") %in% names(posterior_df))) {
   stop(sprintf("Posterior file %s must have columns: ensg, post_mean", posterior_path))
@@ -138,93 +235,122 @@ if (nrow(regulator_hits) > 0) {
   regulator_hits <- data.frame()
 }
 
-side_hits <- rbind(
-  if (nrow(loading_hits) > 0) {
-    loading_hits[, c("Program", "side", "gene", "ensg", "post_mean", "abs_gamma", "gamma_sign", "membership_score", "rank_within_side")]
-  },
-  if (nrow(regulator_hits) > 0) {
-    regulator_hits[, c("Program", "side", "gene", "ensg", "post_mean", "abs_gamma", "gamma_sign", "membership_score", "rank_within_side")]
-  }
-)
-
-if (is.null(side_hits) || nrow(side_hits) == 0) {
-  stop(sprintf("No trait-program gene overlaps for %s", trait_id))
+side_hit_cols <- c("Program", "side", "gene", "ensg", "post_mean", "abs_gamma", "gamma_sign", "membership_score", "rank_within_side")
+side_hit_parts <- list()
+if (nrow(loading_hits) > 0) {
+  side_hit_parts[[length(side_hit_parts) + 1]] <- loading_hits[, side_hit_cols]
 }
-
-program_mean_sign <- sign(program_summary$MEANgamma_top100 - program_summary$shet_adjusted_random_mean)
-names(program_mean_sign) <- program_summary$Program
-
-regulator_sign_lookup <- if (nrow(regulator_df) > 0) {
-  setNames(sign(regulator_df$beta), paste(regulator_df$Program, regulator_df$gene, sep = "::"))
+if (nrow(regulator_hits) > 0) {
+  side_hit_parts[[length(side_hit_parts) + 1]] <- regulator_hits[, side_hit_cols]
+}
+if (length(side_hit_parts) > 0) {
+  side_hits <- do.call(rbind, side_hit_parts)
 } else {
-  character()
+  side_hits <- make_empty_side_hits()[, side_hit_cols, drop = FALSE]
 }
 
-side_hits$predicted_sign <- 0
-is_loading <- side_hits$side == "program_loading"
-side_hits$predicted_sign[is_loading] <- unname(program_mean_sign[side_hits$Program[is_loading]])
+has_overlap <- nrow(side_hits) > 0
+empty_reason <- ""
+if (!has_overlap) {
+  empty_reason <- if (length(selected_programs) == 0) "no_selected_programs" else "no_trait_program_gene_overlap"
+  message(sprintf("No trait-program gene overlaps for %s; writing empty outputs (%s)", trait_id, empty_reason))
+}
 
-reg_keys <- paste(side_hits$Program[!is_loading], side_hits$gene[!is_loading], sep = "::")
-side_hits$predicted_sign[!is_loading] <- unname(regulator_sign_lookup[reg_keys])
-side_hits$predicted_sign[is.na(side_hits$predicted_sign)] <- 0
-side_hits$post_mean_sign <- sign(side_hits$post_mean)
-side_hits$is_discordant <- side_hits$predicted_sign != 0 & side_hits$post_mean_sign != 0 & side_hits$predicted_sign == -side_hits$post_mean_sign
+program_summary$Program <- as.character(program_summary$Program)
+if (nrow(program_summary) > 0 && length(selected_programs) > 0) {
+  program_summary <- program_summary[match(selected_programs, program_summary$Program, nomatch = 0), , drop = FALSE]
+}
 
-program_summary$Program <- factor(program_summary$Program, levels = selected_programs)
-side_hits$Program <- factor(side_hits$Program, levels = selected_programs)
-
-side_counts <- aggregate(gene ~ Program + side, data = side_hits, FUN = length)
-colnames(side_counts)[3] <- "displayed_gene_count"
-loading_counts <- side_counts[side_counts$side == "program_loading", c("Program", "displayed_gene_count")]
-reg_counts <- side_counts[side_counts$side == "regulator", c("Program", "displayed_gene_count")]
-colnames(loading_counts)[2] <- "loading_gene_count"
-colnames(reg_counts)[2] <- "regulator_gene_count"
-program_summary <- merge(program_summary, loading_counts, by = "Program", all.x = TRUE)
-program_summary <- merge(program_summary, reg_counts, by = "Program", all.x = TRUE)
-program_summary$loading_gene_count[is.na(program_summary$loading_gene_count)] <- 0
-program_summary$regulator_gene_count[is.na(program_summary$regulator_gene_count)] <- 0
-
+loading_gene_count <- integer(nrow(program_summary))
+regulator_gene_count <- integer(nrow(program_summary))
+if (has_overlap && nrow(program_summary) > 0) {
+  loading_lookup <- table(side_hits$Program[side_hits$side == "program_loading"])
+  regulator_lookup <- table(side_hits$Program[side_hits$side == "regulator"])
+  loading_gene_count <- as.integer(loading_lookup[program_summary$Program])
+  regulator_gene_count <- as.integer(regulator_lookup[program_summary$Program])
+  loading_gene_count[is.na(loading_gene_count)] <- 0L
+  regulator_gene_count[is.na(regulator_gene_count)] <- 0L
+}
+program_summary$loading_gene_count <- loading_gene_count
+program_summary$regulator_gene_count <- regulator_gene_count
 program_summary$program_label <- sprintf(
   "%s  L:%d  R:%d",
-  as.character(program_summary$Program),
+  program_summary$Program,
   program_summary$loading_gene_count,
   program_summary$regulator_gene_count
 )
-label_lookup <- setNames(program_summary$program_label, as.character(program_summary$Program))
-side_hits$program_label <- unname(label_lookup[as.character(side_hits$Program)])
-
-side_hits$gene_label <- ifelse(side_hits$is_discordant, paste0("(", side_hits$gene, ")"), side_hits$gene)
-max_label_chars <- max(12, min(22, floor(90 / max(1, max_genes_per_side))))
-side_hits$gene_label <- truncate_gene_label(side_hits$gene_label, max_chars = max_label_chars)
-
-side_hits$display_rank <- ave(
-  side_hits$rank_within_side,
-  side_hits$Program,
-  side_hits$side,
-  FUN = function(x) seq_along(x)
-)
-side_hits$x <- ifelse(side_hits$side == "program_loading", -1, 1)
-side_hits$y <- NA_real_
-program_groups <- split(seq_len(nrow(side_hits)), side_hits$Program, drop = TRUE)
-for (idx in program_groups) {
-  df <- side_hits[idx, , drop = FALSE]
-  loading_idx <- idx[df$side == "program_loading"]
-  regulator_idx <- idx[df$side == "regulator"]
-  if (length(loading_idx) > 0) {
-    side_hits$y[loading_idx] <- rev(seq_len(length(loading_idx)))
-  }
-  if (length(regulator_idx) > 0) {
-    side_hits$y[regulator_idx] <- rev(seq_len(length(regulator_idx)))
-  }
-}
+program_summary$trait_id <- trait_id
+program_summary$has_overlap <- has_overlap
+program_summary$empty_reason <- if (has_overlap) "" else empty_reason
 
 panel_rows <- nrow(program_summary)
 row_spacing <- max_genes_per_side + 3
-program_row_lookup <- setNames(seq_len(panel_rows), as.character(program_summary$Program))
-side_hits$panel_row <- unname(program_row_lookup[as.character(side_hits$Program)])
-side_hits$y_global <- (panel_rows - side_hits$panel_row) * row_spacing + side_hits$y
-program_summary$panel_row <- seq_len(panel_rows)
-program_summary$y_center <- (panel_rows - program_summary$panel_row) * row_spacing + (max_genes_per_side / 2)
+program_summary$panel_row <- if (panel_rows > 0) seq_len(panel_rows) else integer()
+program_summary$y_center <- if (panel_rows > 0) {
+  (panel_rows - program_summary$panel_row) * row_spacing + (max_genes_per_side / 2)
+} else {
+  numeric()
+}
+
+if (has_overlap) {
+  program_mean_sign <- sign(program_summary$MEANgamma_top100 - program_summary$shet_adjusted_random_mean)
+  names(program_mean_sign) <- program_summary$Program
+
+  regulator_sign_lookup <- if (nrow(regulator_df) > 0) {
+    setNames(sign(regulator_df$beta), paste(regulator_df$Program, regulator_df$gene, sep = "::"))
+  } else {
+    character()
+  }
+
+  side_hits$predicted_sign <- 0
+  is_loading <- side_hits$side == "program_loading"
+  side_hits$predicted_sign[is_loading] <- unname(program_mean_sign[side_hits$Program[is_loading]])
+  if (any(!is_loading)) {
+    reg_keys <- paste(side_hits$Program[!is_loading], side_hits$gene[!is_loading], sep = "::")
+    side_hits$predicted_sign[!is_loading] <- unname(regulator_sign_lookup[reg_keys])
+  }
+  side_hits$predicted_sign[is.na(side_hits$predicted_sign)] <- 0
+  side_hits$post_mean_sign <- sign(side_hits$post_mean)
+  side_hits$is_discordant <- side_hits$predicted_sign != 0 & side_hits$post_mean_sign != 0 & side_hits$predicted_sign == -side_hits$post_mean_sign
+
+  label_lookup <- setNames(program_summary$program_label, program_summary$Program)
+  side_hits$program_label <- unname(label_lookup[side_hits$Program])
+
+  side_hits$gene_label <- ifelse(side_hits$is_discordant, paste0("(", side_hits$gene, ")"), side_hits$gene)
+  max_label_chars <- max(12, min(22, floor(90 / max(1, max_genes_per_side))))
+  side_hits$gene_label <- truncate_gene_label(side_hits$gene_label, max_chars = max_label_chars)
+
+  side_hits$display_rank <- ave(
+    side_hits$rank_within_side,
+    side_hits$Program,
+    side_hits$side,
+    FUN = function(x) seq_along(x)
+  )
+  side_hits$x <- ifelse(side_hits$side == "program_loading", -1, 1)
+  side_hits$y <- NA_real_
+  program_groups <- split(seq_len(nrow(side_hits)), side_hits$Program, drop = TRUE)
+  for (idx in program_groups) {
+    df <- side_hits[idx, , drop = FALSE]
+    loading_idx <- idx[df$side == "program_loading"]
+    regulator_idx <- idx[df$side == "regulator"]
+    if (length(loading_idx) > 0) {
+      side_hits$y[loading_idx] <- rev(seq_len(length(loading_idx)))
+    }
+    if (length(regulator_idx) > 0) {
+      side_hits$y[regulator_idx] <- rev(seq_len(length(regulator_idx)))
+    }
+  }
+
+  program_row_lookup <- setNames(seq_len(panel_rows), program_summary$Program)
+  side_hits$panel_row <- unname(program_row_lookup[side_hits$Program])
+  side_hits$y_global <- (panel_rows - side_hits$panel_row) * row_spacing + side_hits$y
+  side_hits$trait_id <- trait_id
+  side_hits$has_overlap <- TRUE
+  side_hits$empty_reason <- ""
+  side_hits <- side_hits[, names(make_empty_side_hits()), drop = FALSE]
+} else {
+  side_hits <- make_empty_side_hits()
+}
 
 table_long_path <- paste0(table_prefix, "_long.tsv")
 table_program_path <- paste0(table_prefix, "_programs.tsv")
@@ -232,7 +358,17 @@ ensure_parent_dir(table_long_path)
 utils::write.table(side_hits, table_long_path, row.names = FALSE, sep = "\t", quote = FALSE)
 utils::write.table(program_summary, table_program_path, row.names = FALSE, sep = "\t", quote = FALSE)
 
-if (!(render_plot %in% c("1", "true", "TRUE", "yes", "YES"))) {
+if (!plot_enabled) {
+  quit(save = "no")
+}
+
+if (!has_overlap) {
+  placeholder_message <- if (identical(empty_reason, "no_selected_programs")) {
+    "No programs passed current selection filters"
+  } else {
+    "No overlapping genes passed current filters"
+  }
+  write_placeholder_plot(program_summary, plot_prefix, trait_id, max_genes_per_side, placeholder_message)
   quit(save = "no")
 }
 

@@ -9,11 +9,11 @@ PROJECT_ROOT="${PROJECT_ROOT:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 BASE_CONFIG="${BASE_CONFIG:-${SCRIPT_DIR}/config.base.yaml}"
 FILE_ID_MAP="${FILE_ID_MAP:-${PROJECT_ROOT}/configs/path.file_id_map.tsv}"
 
-TASK_NAME="${TASK_NAME:-trait_program_gene_panel}"
-JOB_NAME="${JOB_NAME:-tpgp}"
+TASK_NAME="${TASK_NAME:-cnmf}"
+JOB_NAME="${JOB_NAME:-cnmf}"
 
 OUTPUT_ROOT="${OUTPUT_ROOT:-/gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all/outputs}"
-OUTPUT_DIR="${OUTPUT_DIR:-${OUTPUT_ROOT}/trait_program_gene_panel}"
+OUTPUT_DIR="${OUTPUT_DIR:-${OUTPUT_ROOT}/cnmf}"
 RUN_ROOT="${RUN_ROOT:-${OUTPUT_ROOT}/${TASK_NAME}}"
 STATUS_DIR="${STATUS_DIR:-${RUN_ROOT}/status}"
 FAILURE_DIR="${FAILURE_DIR:-${RUN_ROOT}/failed}"
@@ -21,14 +21,9 @@ FAILURE_DIR="${FAILURE_DIR:-${RUN_ROOT}/failed}"
 CONDA_SH="${CONDA_SH:-${HOME}/miniconda3/etc/profile.d/conda.sh}"
 CONTROL_ENV="${CONTROL_ENV:-paper-pipeline-control}"
 
-TPGP_K="${TPGP_K:-60}"
-TPGP_MAX_PROGRAMS="${TPGP_MAX_PROGRAMS:-8}"
-TPGP_MAX_GENES_PER_SIDE="${TPGP_MAX_GENES_PER_SIDE:-8}"
-TPGP_HIT_ABS_GAMMA_THRESHOLD="${TPGP_HIT_ABS_GAMMA_THRESHOLD:-0.1}"
-TPGP_LOADING_TOP_N="${TPGP_LOADING_TOP_N:-200}"
-TPGP_REGULATOR_FDR_THRESHOLD="${TPGP_REGULATOR_FDR_THRESHOLD:-0.05}"
-TPGP_MIN_ABS_SCORE="${TPGP_MIN_ABS_SCORE:-1.3}"
-TPGP_RENDER_PLOT="${TPGP_RENDER_PLOT:-1}"
+CNMF_K="${CNMF_K:-60}"
+CNMF_PLOT_LABEL_PROGRAMS="${CNMF_PLOT_LABEL_PROGRAMS:-4,16,25,40}"
+CNMF_CORREGULATION_PAIRS="${CNMF_CORREGULATION_PAIRS:-}"
 
 SUCCESS=0
 TEMP_CONFIG=""
@@ -69,7 +64,7 @@ fi
 
 TEMP_CONFIG="$(mktemp "/tmp/${TASK_NAME}_${LOF_ID}_${SLURM_JOB_ID:-$$}.XXXXXX.yaml")"
 
-python3 - "${LOF_ID}" "${PROJECT_ROOT}" "${BASE_CONFIG}" "${TEMP_CONFIG}" "${OUTPUT_ROOT}" "${OUTPUT_DIR}" "${FILE_ID_MAP}" "${TPGP_K}" "${TPGP_MAX_PROGRAMS}" "${TPGP_MAX_GENES_PER_SIDE}" "${TPGP_HIT_ABS_GAMMA_THRESHOLD}" "${TPGP_LOADING_TOP_N}" "${TPGP_REGULATOR_FDR_THRESHOLD}" "${TPGP_MIN_ABS_SCORE}" "${TPGP_RENDER_PLOT}" <<'PYEOF'
+python3 - "${LOF_ID}" "${PROJECT_ROOT}" "${BASE_CONFIG}" "${TEMP_CONFIG}" "${OUTPUT_ROOT}" "${OUTPUT_DIR}" "${CNMF_K}" "${CNMF_PLOT_LABEL_PROGRAMS}" "${CNMF_CORREGULATION_PAIRS}" <<'PYEOF'
 import sys
 from pathlib import Path
 
@@ -81,15 +76,9 @@ base_path = Path(sys.argv[3])
 temp_path = Path(sys.argv[4])
 output_root = Path(sys.argv[5])
 output_dir = Path(sys.argv[6])
-file_id_map = Path(sys.argv[7])
-k = int(sys.argv[8])
-max_programs = int(sys.argv[9])
-max_genes_per_side = int(sys.argv[10])
-hit_abs_gamma_threshold = float(sys.argv[11])
-loading_top_n = int(sys.argv[12])
-regulator_fdr_threshold = float(sys.argv[13])
-min_abs_score = float(sys.argv[14])
-render_plot = sys.argv[15].strip().lower() in {"1", "true", "yes", "on"}
+k = int(sys.argv[7])
+plot_label_programs = [int(x.strip()) for x in sys.argv[8].split(",") if x.strip()]
+corregulation_pairs_raw = sys.argv[9].strip()
 
 with open(base_path, encoding="utf-8") as handle:
     config = yaml.safe_load(handle)
@@ -98,32 +87,50 @@ config["project_root"] = str(proj_root)
 config["artifact_root"] = str(output_root)
 
 shared = config.get("workflows", {}).get("figures", {}).get("shared_inputs", {})
-for key in (
-    "file_id_map",
-    "posterior_dir",
-    "gene_map",
-    "spectra_path",
-    "regulation_dir",
-    "program_association_dir",
-):
+for key in ("file_id_map", "program_association_dir", "cnmf_regulation_dir"):
     value = shared.get(key)
     if value and isinstance(value, str) and not value.startswith("/"):
         shared[key] = str((base_path.parent / value).resolve())
 
-shared["file_id_map"] = str(file_id_map.resolve())
 config["workflows"]["figures"]["shared_inputs"] = shared
-config["workflows"]["figures"]["trait_program_gene_panel"] = {
+
+trait_file = None
+with open(shared["file_id_map"], encoding="utf-8") as handle:
+    next(handle)
+    for line in handle:
+        parts = line.rstrip("\n\r").split("\t")
+        if len(parts) >= 4 and parts[1] == lof_id:
+            trait_file = Path(parts[3]).name
+            break
+if not trait_file:
+    raise SystemExit(f"Unable to resolve trait file for {lof_id} from {shared['file_id_map']}")
+
+pairs = []
+if corregulation_pairs_raw:
+    for raw in corregulation_pairs_raw.split(","):
+        raw = raw.strip()
+        if not raw:
+            continue
+        if ":" in raw:
+            pair_id, pair_spec = raw.split(":", 1)
+        else:
+            pair_spec = raw
+            pair_id = raw.replace(":", "__")
+        if "|" in pair_spec:
+            program_a, program_b = [x.strip() for x in pair_spec.split("|", 1)]
+        elif ":" in pair_spec:
+            program_a, program_b = [x.strip() for x in pair_spec.split(":", 1)]
+        else:
+            raise SystemExit(f"Invalid CNMF_CORREGULATION_PAIRS entry: {raw}")
+        pairs.append({"output_id": pair_id.strip(), "program_a": program_a, "program_b": program_b})
+
+config["workflows"]["figures"]["cnmf"] = {
     "outputs": {"output_dir": str(output_dir)},
     "parameters": {
-        "lof_ids": [lof_id],
         "k": k,
-        "max_programs": max_programs,
-        "max_genes_per_side": max_genes_per_side,
-        "hit_abs_gamma_threshold": hit_abs_gamma_threshold,
-        "loading_top_n": loading_top_n,
-        "regulator_fdr_threshold": regulator_fdr_threshold,
-        "min_abs_score": min_abs_score,
-        "render_plot": render_plot,
+        "trait_targets": [{"trait_file": trait_file, "trait_id": lof_id}],
+        "plot_label_programs": plot_label_programs,
+        "corregulation_pairs": pairs,
     },
 }
 
@@ -131,7 +138,7 @@ with open(temp_path, "w", encoding="utf-8") as handle:
     yaml.dump(config, handle, default_flow_style=False, sort_keys=False, allow_unicode=True)
 PYEOF
 
-paper-pipeline run --config "${TEMP_CONFIG}" figures-trait-program-gene-panel
+paper-pipeline run --config "${TEMP_CONFIG}" figures-cnmf
 
 printf 'time=%s\njob_id=%s\n' "$(date -Iseconds)" "${SLURM_JOB_ID:-local}" > "${STATUS_DIR}/${LOF_ID}.ok"
 rm -f "${STATUS_DIR}/${LOF_ID}.failed" "${STATUS_DIR}/${LOF_ID}.running" "${FAILURE_DIR}/${LOF_ID}.failed"
