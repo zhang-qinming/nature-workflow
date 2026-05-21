@@ -64,7 +64,7 @@ fi
 
 TEMP_CONFIG="$(mktemp "/tmp/${TASK_NAME}_${LOF_ID}_${SLURM_JOB_ID:-$$}.XXXXXX.yaml")"
 
-python3 - "${LOF_ID}" "${PROJECT_ROOT}" "${BASE_CONFIG}" "${TEMP_CONFIG}" "${OUTPUT_ROOT}" "${OUTPUT_DIR}" "${CNMF_K}" "${CNMF_PLOT_LABEL_PROGRAMS}" "${CNMF_CORREGULATION_PAIRS}" <<'PYEOF'
+python3 - "${LOF_ID}" "${PROJECT_ROOT}" "${BASE_CONFIG}" "${TEMP_CONFIG}" "${OUTPUT_ROOT}" "${OUTPUT_DIR}" "${CNMF_K}" "${CNMF_PLOT_LABEL_PROGRAMS}" "${CNMF_CORREGULATION_PAIRS}" "${FILE_ID_MAP}" <<'PYEOF'
 import sys
 from pathlib import Path
 
@@ -79,6 +79,7 @@ output_dir = Path(sys.argv[6])
 k = int(sys.argv[7])
 plot_label_programs = [int(x.strip()) for x in sys.argv[8].split(",") if x.strip()]
 corregulation_pairs_raw = sys.argv[9].strip()
+file_id_map = Path(sys.argv[10])
 
 with open(base_path, encoding="utf-8") as handle:
     config = yaml.safe_load(handle)
@@ -91,6 +92,7 @@ for key in ("file_id_map", "program_association_dir", "cnmf_regulation_dir"):
     value = shared.get(key)
     if value and isinstance(value, str) and not value.startswith("/"):
         shared[key] = str((base_path.parent / value).resolve())
+shared["file_id_map"] = str(file_id_map.resolve())
 
 config["workflows"]["figures"]["shared_inputs"] = shared
 
@@ -100,7 +102,9 @@ with open(shared["file_id_map"], encoding="utf-8") as handle:
     for line in handle:
         parts = line.rstrip("\n\r").split("\t")
         if len(parts) >= 4 and parts[1] == lof_id:
-            trait_file = Path(parts[3]).name
+            trait_source = parts[3].strip()
+            trait_stem = Path(trait_source).stem
+            trait_file = f"{trait_stem}.per_gene_estimates.tsv"
             break
 if not trait_file:
     raise SystemExit(f"Unable to resolve trait file for {lof_id} from {shared['file_id_map']}")

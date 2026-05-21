@@ -419,61 +419,326 @@ if (!has_overlap) {
 ensure_parent_dir(paste0(plot_prefix, ".pdf"))
 library(ggplot2)
 
-gene_point_size <- max(2.8, min(5.0, 6.0 - max_genes_per_side * 0.18))
-gene_text_size <- max(3.2, min(5.2, 5.8 - max_genes_per_side * 0.22))
-plot_height <- max(7, panel_rows * (1.0 + max_genes_per_side * 0.25))
+signed_value_color <- function(values, max_abs) {
+  values <- as.numeric(values)
+  values[!is.finite(values)] <- 0
+  max_abs <- max(as.numeric(max_abs), 1e-12)
+
+  pos_palette <- grDevices::colorRampPalette(c("#F4B9A9", "#B2182B"))(101)
+  neg_palette <- grDevices::colorRampPalette(c("#B9D8EA", "#2166AC"))(101)
+  intensity <- pmin(1, abs(values) / max_abs)
+  idx <- pmax(1, pmin(101, floor(intensity * 100) + 1))
+
+  colors <- rep("#8A8F98", length(values))
+  colors[values > 0] <- pos_palette[idx[values > 0]]
+  colors[values < 0] <- neg_palette[idx[values < 0]]
+  colors
+}
+
+cap_nonfinite_scores <- function(values) {
+  values <- as.numeric(values)
+  finite_values <- values[is.finite(values)]
+  cap <- if (length(finite_values) > 0) max(abs(finite_values), 1, na.rm = TRUE) else 1
+  values[is.infinite(values)] <- sign(values[is.infinite(values)]) * cap
+  values[is.na(values)] <- 0
+  values
+}
+
+format_signed_score <- function(values) {
+  values <- as.numeric(values)
+  out <- ifelse(
+    is.na(values),
+    "NA",
+    ifelse(
+      is.finite(values),
+      sprintf("%+.1f", values),
+      sprintf("%sInf", ifelse(values > 0, "+", "-"))
+    )
+  )
+  out
+}
+
+program_plot <- program_summary
+program_plot$row_index <- seq_len(panel_rows)
+row_spacing <- max(1.75, 0.85 + max_genes_per_side * 0.18)
+program_plot$y_row <- (panel_rows - program_plot$row_index + 1) * row_spacing
+program_plot$program_x <- 0
+
+program_abs <- abs(program_plot$program_score)
+regulator_abs <- abs(program_plot$regulator_score)
+program_abs[is.na(program_abs)] <- -Inf
+regulator_abs[is.na(regulator_abs)] <- -Inf
+use_program_score <- program_abs >= regulator_abs
+use_program_score[!is.finite(program_abs) & !is.finite(regulator_abs)] <- TRUE
+program_plot$dominant_source <- ifelse(use_program_score, "B", "R")
+program_plot$program_effect_raw <- ifelse(use_program_score, program_plot$program_score, program_plot$regulator_score)
+program_plot$program_effect_score <- cap_nonfinite_scores(program_plot$program_effect_raw)
+program_effect_max <- max(abs(program_plot$program_effect_score), 1, na.rm = TRUE)
+program_plot$program_direction <- sign(program_plot$program_effect_score)
+program_plot$effect_color <- signed_value_color(program_plot$program_effect_score, program_effect_max)
+program_plot$effect_alpha <- 0.40 + 0.55 * pmin(1, abs(program_plot$program_effect_score) / program_effect_max)
+program_plot$effect_width <- 0.55 + 1.8 * pmin(1, abs(program_plot$program_effect_score) / program_effect_max)
+program_plot$program_node_label <- sprintf(
+  "%s | B:%s | R:%s\nL:%d  R:%d",
+  program_plot$Program,
+  format_signed_score(program_plot$program_score),
+  format_signed_score(program_plot$regulator_score),
+  program_plot$loading_gene_count,
+  program_plot$regulator_gene_count
+)
+program_plot$effect_y <- program_plot$y_row + row_spacing * 0.24
+program_plot$effect_x0 <- -0.38
+program_plot$effect_x1 <- 0.38
+
+max_side_count <- max(table(paste(side_hits$Program, side_hits$side, sep = "::")), 1)
+gene_y_gap <- min(0.22, (row_spacing * 0.72) / max(1, max_side_count - 1))
+gene_plot <- merge(
+  side_hits,
+  program_plot[, c("Program", "y_row")],
+  by = "Program",
+  all.x = TRUE,
+  sort = FALSE
+)
+gene_plot <- gene_plot[!is.na(gene_plot$y_row), , drop = FALSE]
+gene_plot$side_label <- ifelse(gene_plot$side == "program_loading", "Program loading genes", "Regulator genes")
+gene_plot$side_count <- ave(
+  seq_len(nrow(gene_plot)),
+  gene_plot$Program,
+  gene_plot$side,
+  FUN = function(x) length(x)
+)
+gene_plot$display_rank <- as.numeric(gene_plot$display_rank)
+gene_plot$y_gene <- gene_plot$y_row + (gene_plot$display_rank - ((gene_plot$side_count + 1) / 2)) * gene_y_gap
+gene_plot$gene_point_x <- ifelse(gene_plot$side == "program_loading", -3.45, 3.45)
+gene_plot$label_x <- ifelse(gene_plot$side == "program_loading", -3.78, 3.78)
+gene_plot$program_edge_x <- ifelse(gene_plot$side == "program_loading", -0.82, 0.82)
+gene_plot$label_hjust <- ifelse(gene_plot$side == "program_loading", 1, 0)
+gene_plot$post_mean_plot <- ifelse(is.finite(gene_plot$post_mean), gene_plot$post_mean, 0)
+gene_gamma_max <- max(abs(gene_plot$post_mean_plot), hit_abs_gamma_threshold, na.rm = TRUE)
+gene_plot$gene_color <- signed_value_color(gene_plot$post_mean_plot, gene_gamma_max)
+gene_plot$branch_alpha <- 0.28 + 0.60 * pmin(1, abs(gene_plot$post_mean_plot) / gene_gamma_max)
+gene_plot$abs_gamma_plot <- pmax(abs(gene_plot$post_mean_plot), 0)
+
+pos_effects <- program_plot[program_plot$program_direction > 0, , drop = FALSE]
+neg_effects <- program_plot[program_plot$program_direction < 0, , drop = FALSE]
+zero_effects <- program_plot[program_plot$program_direction == 0, , drop = FALSE]
+if (nrow(neg_effects) > 0) {
+  neg_effects$cap_x <- neg_effects$effect_x1
+  neg_effects$cap_y0 <- neg_effects$effect_y - 0.08
+  neg_effects$cap_y1 <- neg_effects$effect_y + 0.08
+}
+
+y_header <- max(program_plot$y_row) + row_spacing * 0.82
+y_trait <- y_header + row_spacing * 0.62
+y_legend <- min(program_plot$y_row) - row_spacing * 0.72
+plot_y_min <- y_legend - row_spacing * 0.58
+plot_y_max <- y_trait + row_spacing * 0.50
+plot_x_min <- -5.15
+plot_x_max <- 5.15
+plot_width <- max(13.5, min(18.5, 12.4 + max_genes_per_side * 0.35))
+plot_height <- max(7.8, min(16.5, 3.2 + panel_rows * 0.92))
+gene_text_size <- max(2.6, min(3.7, 4.2 - max_genes_per_side * 0.11))
+program_text_size <- max(2.55, min(3.35, 3.75 - panel_rows * 0.055))
+
+heading_df <- data.frame(
+  x = c(-3.45, 0, 3.45),
+  y = y_header,
+  label = c(
+    sprintf("Program loading genes\n(top %d overlap)", loading_top_n),
+    "Selected programs\nB/R signed -log10(P)",
+    sprintf("Regulator genes\n(FDR <= %.3g)", regulator_fdr_threshold)
+  ),
+  stringsAsFactors = FALSE
+)
+trait_df <- data.frame(x = 0, y = y_trait, label = paste0("Trait: ", trait_id), stringsAsFactors = FALSE)
+spine_df <- data.frame(x = 0, y = min(program_plot$y_row) - row_spacing * 0.20, yend = y_trait - row_spacing * 0.32)
+gene_color_legend <- data.frame(
+  x = c(-4.10, -2.75, -1.60),
+  y = y_legend,
+  label = c("negative gamma", "near 0", "positive gamma"),
+  color = c("#2166AC", "#8A8F98", "#B2182B"),
+  stringsAsFactors = FALSE
+)
+direction_legend <- data.frame(
+  x = 0.95,
+  y = y_legend,
+  label = paste(
+    "Gene branches point toward the modeled program.",
+    "Program glyph: arrow = positive dominant direction; flat bar = negative.",
+    "Parentheses = discordant gene direction.",
+    sep = "\n"
+  ),
+  stringsAsFactors = FALSE
+)
+
+subtitle_text <- sprintf(
+  "%d selected programs; %d genes shown (%d loading, %d regulator). Gene color encodes signed gamma and intensity.",
+  panel_rows,
+  nrow(gene_plot),
+  sum(gene_plot$side == "program_loading"),
+  sum(gene_plot$side == "regulator")
+)
+caption_text <- sprintf(
+  "B = program burden score; R = regulator-burden correlation score. Program fill marks Bonferroni evidence class. Filters: |gamma| >= %.3g, top %d loading genes, regulator FDR <= %.3g.",
+  hit_abs_gamma_threshold,
+  loading_top_n,
+  regulator_fdr_threshold
+)
 
 g <- ggplot()
 g <- g + geom_segment(
-  data = program_summary,
-  aes(x = -0.78, xend = 0.78, y = y_center, yend = y_center),
-  linewidth = 0.4,
-  color = "grey88"
+  data = spine_df,
+  aes(x = x, y = y, xend = x, yend = yend),
+  linewidth = 0.45,
+  color = "#D1D5DB"
+)
+g <- g + geom_segment(
+  data = gene_plot,
+  aes(
+    x = gene_point_x,
+    y = y_gene,
+    xend = program_edge_x,
+    yend = y_row,
+    color = gene_color,
+    alpha = branch_alpha,
+    linetype = side_label
+  ),
+  linewidth = 0.32,
+  arrow = grid::arrow(length = grid::unit(0.035, "inches"), type = "open")
+)
+g <- g + geom_segment(
+  data = zero_effects,
+  aes(x = effect_x0, y = effect_y, xend = effect_x1, yend = effect_y, color = effect_color, linewidth = effect_width, alpha = effect_alpha)
+)
+g <- g + geom_segment(
+  data = neg_effects,
+  aes(x = effect_x0, y = effect_y, xend = effect_x1, yend = effect_y, color = effect_color, linewidth = effect_width, alpha = effect_alpha)
+)
+if (nrow(neg_effects) > 0) {
+  g <- g + geom_segment(
+    data = neg_effects,
+    aes(x = cap_x, y = cap_y0, xend = cap_x, yend = cap_y1, color = effect_color, linewidth = effect_width, alpha = effect_alpha)
+  )
+}
+g <- g + geom_segment(
+  data = pos_effects,
+  aes(x = effect_x0, y = effect_y, xend = effect_x1, yend = effect_y, color = effect_color, linewidth = effect_width, alpha = effect_alpha),
+  arrow = grid::arrow(length = grid::unit(0.10, "inches"), type = "closed")
 )
 g <- g + geom_label(
-  data = program_summary,
-  aes(x = 0, y = y_center, label = program_label, fill = color),
-  label.size = 0.15,
-  label.padding = grid::unit(0.18, "lines"),
-  size = gene_text_size * 0.72,
+  data = program_plot,
+  aes(x = program_x, y = y_row, label = program_node_label, fill = color),
+  label.size = 0.18,
+  label.padding = grid::unit(0.15, "lines"),
+  lineheight = 0.90,
+  size = program_text_size,
   fontface = "bold",
-  color = "black"
+  color = "#111827"
 )
 g <- g + geom_point(
-  data = side_hits,
-  aes(x = x, y = y_global, color = gamma_sign),
-  size = gene_point_size
+  data = gene_plot,
+  aes(x = gene_point_x, y = y_gene, shape = side_label, size = abs_gamma_plot, color = gene_color),
+  stroke = 0.65
 )
 g <- g + geom_text(
-  data = side_hits,
+  data = gene_plot,
   aes(
-    x = ifelse(side_hits$side == "program_loading", -0.94, 0.94),
-    y = y_global,
+    x = label_x,
+    y = y_gene,
     label = gene_label,
-    hjust = ifelse(side_hits$side == "program_loading", 1, 0),
-    color = gamma_sign
+    hjust = label_hjust,
+    color = gene_color,
+    fontface = ifelse(is_discordant, "bold", "plain")
   ),
-  size = gene_text_size
+  size = gene_text_size,
+  lineheight = 0.9
 )
-g <- g + annotate("text", x = -1, y = max(side_hits$y_global) + 2, label = "Program loading genes", hjust = 0.5, fontface = "bold", size = gene_text_size * 1.05)
-g <- g + annotate("text", x = 1, y = max(side_hits$y_global) + 2, label = "Program regulators", hjust = 0.5, fontface = "bold", size = gene_text_size * 1.05)
-g <- g + annotate("text", x = 0, y = max(side_hits$y_global) + 2, label = trait_id, hjust = 0.5, fontface = "bold", size = gene_text_size * 1.1)
-g <- g + scale_color_manual(values = c("positive" = "#B40426", "negative" = "#3B4CC0", "zero" = "grey55"))
+g <- g + geom_label(
+  data = trait_df,
+  aes(x = x, y = y, label = label),
+  fill = "#111827",
+  color = "white",
+  label.size = 0,
+  label.padding = grid::unit(0.25, "lines"),
+  size = 4.2,
+  fontface = "bold"
+)
+g <- g + geom_text(
+  data = heading_df,
+  aes(x = x, y = y, label = label),
+  size = 3.35,
+  lineheight = 0.92,
+  fontface = "bold",
+  color = "#111827"
+)
+g <- g + geom_point(
+  data = gene_color_legend,
+  aes(x = x, y = y, color = color),
+  size = 3.1
+)
+g <- g + geom_text(
+  data = gene_color_legend,
+  aes(x = x + 0.12, y = y, label = label, color = color),
+  hjust = 0,
+  size = 2.75,
+  fontface = "bold"
+)
+g <- g + geom_label(
+  data = direction_legend,
+  aes(x = x, y = y, label = label),
+  hjust = 0,
+  vjust = 0.5,
+  fill = "white",
+  color = "#374151",
+  label.size = 0.16,
+  label.padding = grid::unit(0.16, "lines"),
+  lineheight = 0.95,
+  size = 2.55
+)
+g <- g + scale_color_identity()
+g <- g + scale_alpha_identity()
+g <- g + scale_linewidth_identity()
 g <- g + scale_fill_manual(
   values = c(
-    "other" = "#ECECEC",
+    "other" = "#F3F4F6",
     "program_enriched" = "#F9D48B",
     "regulator_enriched" = "#A9C7E6",
     "both_enriched" = "#A9D6A4"
   ),
-  drop = FALSE
+  drop = FALSE,
+  name = "Program evidence"
 )
-g <- g + coord_cartesian(xlim = c(-1.28, 1.28), ylim = c(0, max(side_hits$y_global) + 3), clip = "off")
+g <- g + scale_shape_manual(
+  values = c("Program loading genes" = 16, "Regulator genes" = 17),
+  name = "Gene source"
+)
+g <- g + scale_linetype_manual(
+  values = c("Program loading genes" = "solid", "Regulator genes" = "22"),
+  name = "Gene source"
+)
+g <- g + scale_size_continuous(
+  range = c(2.1, 4.5),
+  name = "|gamma|"
+)
+g <- g + coord_cartesian(xlim = c(plot_x_min, plot_x_max), ylim = c(plot_y_min, plot_y_max), clip = "off")
+g <- g + labs(
+  title = "Programs selected for modeling trait associations",
+  subtitle = subtitle_text,
+  caption = caption_text
+)
 g <- g + theme_void(base_family = "Helvetica")
 g <- g + theme(
-  legend.position = "none",
-  plot.margin = margin(18, 28, 18, 28)
+  plot.background = element_rect(fill = "white", color = NA),
+  panel.background = element_rect(fill = "white", color = NA),
+  legend.position = "right",
+  legend.box = "vertical",
+  legend.title = element_text(size = 9, face = "bold", color = "#111827"),
+  legend.text = element_text(size = 8, color = "#374151"),
+  plot.title = element_text(size = 17, face = "bold", color = "#111827", hjust = 0.5),
+  plot.subtitle = element_text(size = 9.5, color = "#374151", hjust = 0.5, margin = margin(t = 4, b = 10)),
+  plot.caption = element_text(size = 8.2, color = "#4B5563", hjust = 0, margin = margin(t = 10)),
+  plot.margin = margin(18, 30, 18, 30)
 )
 
-ggsave(plot = g, filename = paste0(plot_prefix, ".pdf"), width = 13, height = plot_height)
-ggsave(plot = g, filename = paste0(plot_prefix, ".png"), width = 13, height = plot_height, dpi = 300)
+ggsave(plot = g, filename = paste0(plot_prefix, ".pdf"), width = plot_width, height = plot_height)
+ggsave(plot = g, filename = paste0(plot_prefix, ".png"), width = plot_width, height = plot_height, dpi = 300)

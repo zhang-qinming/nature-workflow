@@ -36,7 +36,9 @@ parse_pairs() {
             local pair_name="${entry%%:*}"
             printf '%s\n' "${pair_name}"
         else
-            printf '%s\n' "${entry//:/__}"
+            local pair_name="${entry//:/__}"
+            pair_name="${pair_name//|/_}"
+            printf '%s\n' "${pair_name}"
         fi
     done
 }
