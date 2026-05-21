@@ -16,6 +16,7 @@ loading_top_n <- if (length(args) >= 13) as.numeric(args[13]) else 200
 regulator_fdr_threshold <- if (length(args) >= 14) as.numeric(args[14]) else 0.05
 min_abs_score <- if (length(args) >= 15) as.numeric(args[15]) else 1.3
 render_plot <- if (length(args) >= 16) as.character(args[16]) else "1"
+association_trait_file <- if (length(args) >= 17) as.character(args[17]) else ""
 
 script_path_arg <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
 script_dir <- if (length(script_path_arg) > 0) {
@@ -124,6 +125,40 @@ write_placeholder_plot <- function(program_summary, plot_prefix, trait_id, max_g
   ggsave(plot = g, filename = paste0(plot_prefix, ".png"), width = 10, height = plot_height, dpi = 300)
 }
 
+program_association_files_exist <- function(association_dir, trait_file, k) {
+  all(file.exists(c(
+    file.path(association_dir, paste0("programs_enrichment_K", k, "_", trait_file)),
+    file.path(association_dir, paste0("regulators_enrichment_K", k, "_", trait_file))
+  )))
+}
+
+resolve_association_trait_file <- function(association_dir, association_trait_file, posterior_path, k) {
+  posterior_file <- basename(posterior_path)
+  posterior_as_csv <- sub("\\.per_gene_estimates\\.tsv$", ".csv", posterior_file)
+  posterior_as_tsv <- sub("\\.per_gene_estimates\\.tsv$", ".tsv", posterior_file)
+  candidates <- unique(c(association_trait_file, posterior_file, posterior_as_csv, posterior_as_tsv))
+  candidates <- candidates[nzchar(candidates)]
+
+  if (length(candidates) == 0) {
+    return(posterior_file)
+  }
+
+  for (candidate in candidates) {
+    if (program_association_files_exist(association_dir, candidate, k)) {
+      if (!identical(candidate, association_trait_file)) {
+        message(sprintf(
+          "Using fallback ProgramLevel trait file '%s' because requested '%s' was not found",
+          candidate,
+          association_trait_file
+        ))
+      }
+      return(candidate)
+    }
+  }
+
+  association_trait_file
+}
+
 posterior_df <- data.table::fread(posterior_path, data.table = FALSE)
 if (!all(c("ensg", "post_mean") %in% names(posterior_df))) {
   stop(sprintf("Posterior file %s must have columns: ensg, post_mean", posterior_path))
@@ -137,9 +172,11 @@ posterior_df$gene[is.na(posterior_df$gene) | !nzchar(posterior_df$gene)] <- post
 posterior_df$gamma_sign <- ifelse(posterior_df$post_mean > 0, "positive", ifelse(posterior_df$post_mean < 0, "negative", "zero"))
 posterior_df$abs_gamma <- abs(posterior_df$post_mean)
 
-trait_file <- basename(posterior_path)
+trait_file <- resolve_association_trait_file(program_association_dir, association_trait_file, posterior_path, k)
+message(sprintf("Using ProgramLevel association trait file: %s", trait_file))
+message(sprintf("Using posterior file: %s", basename(posterior_path)))
 program_summary <- read_program_regulator_summary(program_association_dir, trait_file, k, character())
-program_summary$Program <- as.character(program_summary$Program)
+program_summary$Program <- normalize_program_ids(program_summary$Program)
 program_summary$program_sig <- program_summary$MEANgamma_top100_shet_adjusted_P < 0.05 / nrow(program_summary)
 program_summary$regulator_sig <- program_summary$P_withShet < 0.05 / nrow(program_summary)
 program_summary$priority_tier <- ifelse(
@@ -155,7 +192,7 @@ program_summary <- program_summary[
 ]
 if (nrow(program_summary) == 0) {
   program_summary <- read_program_regulator_summary(program_association_dir, trait_file, k, character())
-  program_summary$Program <- as.character(program_summary$Program)
+  program_summary$Program <- normalize_program_ids(program_summary$Program)
   program_summary$priority_score <- pmax(abs(program_summary$program_score), abs(program_summary$regulator_score))
   program_summary <- program_summary[order(-program_summary$priority_score, program_summary$Program), , drop = FALSE]
 }
@@ -170,6 +207,12 @@ regulator_df <- regulator_df[regulator_df$Program %in% selected_programs, , drop
 regulator_df <- regulator_df[regulator_df$fdr <= regulator_fdr_threshold, , drop = FALSE]
 regulator_df <- regulator_df[order(regulator_df$Program, regulator_df$fdr, -abs(regulator_df$beta), regulator_df$gene), , drop = FALSE]
 if (nrow(regulator_df) > 0) {
+  regulator_df$gene_ensg <- lookups$resolve_to_ensg(regulator_df$gene)
+  regulator_df$gene_symbol <- unname(lookups$gene_lookup[regulator_df$gene_ensg])
+  regulator_df$gene_symbol[is.na(regulator_df$gene_symbol) | !nzchar(regulator_df$gene_symbol)] <- regulator_df$gene[
+    is.na(regulator_df$gene_symbol) | !nzchar(regulator_df$gene_symbol)
+  ]
+  regulator_df$gene <- regulator_df$gene_symbol
   regulator_df$rank_within_side <- ave(
     regulator_df$fdr,
     regulator_df$Program,
@@ -184,6 +227,8 @@ if (nrow(trait_hits) == 0) {
   trait_hits <- posterior_df[order(-posterior_df$abs_gamma), , drop = FALSE]
   trait_hits <- head(trait_hits, min(30, nrow(trait_hits)))
 }
+
+side_hit_cols <- c("Program", "side", "gene", "ensg", "post_mean", "abs_gamma", "gamma_sign", "membership_score", "rank_within_side")
 
 loading_hits <- merge(
   spectra_top,
@@ -207,7 +252,7 @@ if (nrow(loading_hits) > 0) {
     lapply(split(loading_hits, loading_hits$Program), function(df) head(df, max_genes_per_side))
   )
 } else {
-  loading_hits <- data.frame()
+  loading_hits <- make_empty_side_hits()[, side_hit_cols, drop = FALSE]
 }
 
 regulator_hits <- merge(
@@ -232,10 +277,9 @@ if (nrow(regulator_hits) > 0) {
     lapply(split(regulator_hits, regulator_hits$Program), function(df) head(df, max_genes_per_side))
   )
 } else {
-  regulator_hits <- data.frame()
+  regulator_hits <- make_empty_side_hits()[, side_hit_cols, drop = FALSE]
 }
 
-side_hit_cols <- c("Program", "side", "gene", "ensg", "post_mean", "abs_gamma", "gamma_sign", "membership_score", "rank_within_side")
 side_hit_parts <- list()
 if (nrow(loading_hits) > 0) {
   side_hit_parts[[length(side_hit_parts) + 1]] <- loading_hits[, side_hit_cols]

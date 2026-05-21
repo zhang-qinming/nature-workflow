@@ -7,11 +7,21 @@ ensure_parent_dir <- function(path) {
   dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
 }
 
+normalize_program_ids <- function(programs) {
+  raw <- trimws(as.character(programs))
+  raw[is.na(raw)] <- ""
+  stripped <- sub("^P", "", raw, ignore.case = TRUE)
+  numeric_program <- grepl("^[0-9]+$", stripped)
+  raw[numeric_program] <- paste0("P", as.integer(stripped[numeric_program]))
+  raw
+}
+
 parse_program_vector <- function(raw) {
   if (is.null(raw) || !nzchar(raw)) {
     return(character())
   }
-  paste0("P", trimws(strsplit(as.character(raw), ",", fixed = TRUE)[[1]]))
+  tokens <- trimws(strsplit(as.character(raw), ",", fixed = TRUE)[[1]])
+  normalize_program_ids(tokens[nzchar(tokens)])
 }
 
 friendly_geneset_name <- function(name) {
@@ -434,9 +444,66 @@ read_program_regulator_summary <- function(association_dir, trait_file, k, label
   programs_path <- file.path(association_dir, paste0("programs_enrichment_K", k, "_", trait_file))
   regulators_path <- file.path(association_dir, paste0("regulators_enrichment_K", k, "_", trait_file))
 
+  missing_paths <- c(programs_path, regulators_path)[!file.exists(c(programs_path, regulators_path))]
+  if (length(missing_paths) > 0) {
+    trait_hint <- sub("[._].*$", "", basename(trait_file))
+    candidates <- if (dir.exists(association_dir)) {
+      list.files(association_dir, pattern = paste0("_K", k, "_"))
+    } else {
+      character()
+    }
+    hinted <- candidates[grepl(trait_hint, candidates, fixed = TRUE)]
+    shown <- if (length(hinted) > 0) hinted else candidates
+    candidate_text <- if (length(shown) > 0) paste(head(shown, 12), collapse = ", ") else "<none>"
+    stop(sprintf(
+      paste(
+        "Missing ProgramLevel association file(s) for trait_file '%s'.",
+        "Expected programs file: %s",
+        "Expected regulators file: %s",
+        "Candidate files in association_dir: %s",
+        sep = "\n"
+      ),
+      trait_file,
+      programs_path,
+      regulators_path,
+      candidate_text
+    ))
+  }
+
   programs <- data.table::fread(programs_path, data.table = FALSE)
   regulators <- data.table::fread(regulators_path, data.table = FALSE)
+  if (!"Program" %in% names(programs)) {
+    stop(sprintf("Program summary %s is missing column: Program", programs_path))
+  }
+  if (!"Program" %in% names(regulators)) {
+    stop(sprintf("Regulator summary %s is missing column: Program", regulators_path))
+  }
+  programs$Program <- normalize_program_ids(programs$Program)
+  regulators$Program <- normalize_program_ids(regulators$Program)
   df <- merge(programs, regulators, by = "Program", all = FALSE)
+
+  if (nrow(df) == 0) {
+    stop(sprintf(
+      "Program and regulator summaries for trait_file '%s' have no overlapping Program IDs after normalization",
+      trait_file
+    ))
+  }
+
+  required_columns <- c(
+    "MEANgamma_top100",
+    "shet_adjusted_random_mean",
+    "MEANgamma_top100_shet_adjusted_P",
+    "beta_withShet",
+    "P_withShet"
+  )
+  missing_columns <- setdiff(required_columns, names(df))
+  if (length(missing_columns) > 0) {
+    stop(sprintf(
+      "ProgramLevel summary for trait_file '%s' is missing columns: %s",
+      trait_file,
+      paste(missing_columns, collapse = ", ")
+    ))
+  }
 
   bonferroni_cutoff <- 0.05 / nrow(df)
   df$program_score <- sign(df$MEANgamma_top100 - df$shet_adjusted_random_mean) * (-log10(df$MEANgamma_top100_shet_adjusted_P))
@@ -548,7 +615,7 @@ read_regulator_long <- function(regulation_dir, k) {
       stop(sprintf("Regulation file %s must have at least 3 columns", program_path))
     }
     colnames(tmp)[1:3] <- c("gene", "beta", "p")
-    tmp$Program <- paste0("P", program_index)
+    tmp$Program <- normalize_program_ids(program_index)
     rows[[length(rows) + 1]] <- tmp[, c("Program", "gene", "beta", "p")]
   }
 

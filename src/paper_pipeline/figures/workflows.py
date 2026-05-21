@@ -129,6 +129,14 @@ class GeneLevelScatterTarget:
 
 
 @dataclass(frozen=True)
+class TraitProgramGenePanelTarget:
+    source_id: str
+    trait_stem: str
+    posterior_path: Path
+    association_trait_file: str
+
+
+@dataclass(frozen=True)
 class ResolvedFiguresGeneLevelScatter:
     config: LoadedConfig
     limma_path: Path
@@ -218,7 +226,7 @@ class ResolvedFiguresTraitProgramGenePanel:
     spectra_path: Path
     gene_map: Path
     output_dir: Path
-    targets: tuple[GeneLevelScatterTarget, ...]
+    targets: tuple[TraitProgramGenePanelTarget, ...]
     k: int
     max_programs: int
     max_genes_per_side: int
@@ -1271,7 +1279,7 @@ def _resolve_figures_trait_program_gene_panel(config: LoadedConfig) -> ResolvedF
     if not lof_ids:
         lof_ids = tuple(entry.id2 for entry in mapping_entries)
 
-    targets: list[GeneLevelScatterTarget] = []
+    targets: list[TraitProgramGenePanelTarget] = []
     for source_id in lof_ids:
         entry = next((item for item in mapping_entries if item.id2 == source_id), None)
         if entry is None:
@@ -1281,10 +1289,11 @@ def _resolve_figures_trait_program_gene_panel(config: LoadedConfig) -> ResolvedF
             )
         trait_stem = _file_label(str(entry.path2))
         targets.append(
-            GeneLevelScatterTarget(
+            TraitProgramGenePanelTarget(
                 source_id=_normalize_output_id(source_id, "workflows.figures.trait_program_gene_panel.parameters.lof_ids"),
                 trait_stem=trait_stem,
                 posterior_path=posterior_dir / _posterior_filename_for_entry(entry, posterior_name_map),
+                association_trait_file=Path(entry.path2).name,
             )
         )
 
@@ -2151,6 +2160,7 @@ def build_figures_trait_program_gene_panel_tasks(config: LoadedConfig) -> list[T
             resolved.regulator_fdr_threshold,
             resolved.min_abs_score,
             int(resolved.render_plot),
+            target.association_trait_file,
         )
         tasks.append(
             Task(
@@ -2165,6 +2175,8 @@ def build_figures_trait_program_gene_panel_tasks(config: LoadedConfig) -> list[T
                 "figure_kind": "trait_program_gene_panel",
                 "source_id": target.source_id,
                 "trait_stem": target.trait_stem,
+                "association_trait_file": target.association_trait_file,
+                "posterior_path": str(target.posterior_path),
                 "table_long_path": f"{table_prefix}_long.tsv",
                 "table_program_path": f"{table_prefix}_programs.tsv",
                 "plot_pdf": str(plot_prefix.with_suffix(".pdf")) if resolved.render_plot else "",
