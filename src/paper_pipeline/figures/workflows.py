@@ -211,6 +211,25 @@ class ResolvedFiguresCnmfProgramEnrichment:
 
 
 @dataclass(frozen=True)
+class ResolvedFiguresTraitProgramGenePanel:
+    config: LoadedConfig
+    program_association_dir: Path
+    regulation_dir: Path
+    spectra_path: Path
+    gene_map: Path
+    output_dir: Path
+    targets: tuple[GeneLevelScatterTarget, ...]
+    k: int
+    max_programs: int
+    max_genes_per_side: int
+    hit_abs_gamma_threshold: float
+    loading_top_n: int
+    regulator_fdr_threshold: float
+    min_abs_score: float
+    render_plot: bool
+
+
+@dataclass(frozen=True)
 class GwasLocusTarget:
     output_id: str
     source_id: str
@@ -1228,6 +1247,67 @@ def _resolve_figures_cnmf_program_enrichment(config: LoadedConfig) -> ResolvedFi
     )
 
 
+def _resolve_figures_trait_program_gene_panel(config: LoadedConfig) -> ResolvedFiguresTraitProgramGenePanel:
+    workflow = _workflow_mapping(config, "trait_program_gene_panel")
+    inputs = _validate_mapping(workflow.get("inputs"), "workflows.figures.trait_program_gene_panel.inputs")
+    outputs = _validate_mapping(workflow.get("outputs"), "workflows.figures.trait_program_gene_panel.outputs")
+    parameters = _validate_mapping(workflow.get("parameters"), "workflows.figures.trait_program_gene_panel.parameters")
+
+    mapping_entries = _load_file_id_map(config, inputs.get("file_id_map"))
+    if not mapping_entries:
+        raise ConfigError("workflows.figures.trait_program_gene_panel.inputs.file_id_map is required")
+
+    posterior_dir = config.resolve_path_or_artifact(inputs.get("posterior_dir"), "genebayes", "posterior")
+    posterior_name_map = _load_two_column_name_map(
+        config,
+        inputs.get("posterior_name_map"),
+        label="workflows.figures.trait_program_gene_panel.inputs.posterior_name_map",
+    )
+    lof_ids = _string_list(parameters.get("lof_ids"), "workflows.figures.trait_program_gene_panel.parameters.lof_ids")
+    if not lof_ids:
+        lof_ids = tuple(entry.id2 for entry in mapping_entries)
+
+    targets: list[GeneLevelScatterTarget] = []
+    for source_id in lof_ids:
+        entry = next((item for item in mapping_entries if item.id2 == source_id), None)
+        if entry is None:
+            raise ConfigError(
+                f"workflows.figures.trait_program_gene_panel.parameters.lof_ids value '{source_id}' "
+                "was not found in file_id_map column id2"
+            )
+        trait_stem = _file_label(str(entry.path2))
+        targets.append(
+            GeneLevelScatterTarget(
+                source_id=_normalize_output_id(source_id, "workflows.figures.trait_program_gene_panel.parameters.lof_ids"),
+                trait_stem=trait_stem,
+                posterior_path=posterior_dir / _posterior_filename_for_entry(entry, posterior_name_map),
+            )
+        )
+
+    k = int(parameters.get("k", 60))
+    return ResolvedFiguresTraitProgramGenePanel(
+        config=config,
+        program_association_dir=config.resolve_path(inputs.get("program_association_dir"))
+        or config.project_root / "outputs" / "perturbseq" / "cnmf_genomewide" / "trait_association" / "K562GW" / "ProgramLevel",
+        regulation_dir=config.resolve_path(inputs.get("regulation_dir"))
+        or config.project_root / "outputs" / "perturbseq" / "cnmf_genomewide" / "cNMF_regulation" / "K562GW",
+        spectra_path=config.resolve_path(inputs.get("spectra_path"))
+        or config.project_root / "outputs" / "perturbseq" / "cnmf_genomewide" / "cNMF" / "cNMF_all" / f"cNMF_all.gene_spectra_score.k_{k}.dt_0_5.txt",
+        gene_map=config.resolve_path(inputs.get("gene_map"))
+        or config.project_root / "data" / "gencode_v41_gname_gid_ALL_sorted_onlyID",
+        output_dir=config.resolve_path_or_artifact(outputs.get("output_dir"), "trait_program_gene_panel"),
+        targets=tuple(targets),
+        k=k,
+        max_programs=int(parameters.get("max_programs", 8)),
+        max_genes_per_side=int(parameters.get("max_genes_per_side", 8)),
+        hit_abs_gamma_threshold=float(parameters.get("hit_abs_gamma_threshold", 0.1)),
+        loading_top_n=int(parameters.get("loading_top_n", 200)),
+        regulator_fdr_threshold=float(parameters.get("regulator_fdr_threshold", 0.05)),
+        min_abs_score=float(parameters.get("min_abs_score", 1.3)),
+        render_plot=bool(parameters.get("render_plot", True)),
+    )
+
+
 def _script_path(name: str) -> Path:
     path = SCRIPT_DIR / name
     if not path.exists():
@@ -1934,6 +2014,8 @@ def build_figures_cross_trait_heatmap_tasks(config: LoadedConfig) -> list[Task]:
     ]
     tasks.append(_write_manifest_task(meta_dir / "manifest.tsv", manifest_rows, "figures-cross-trait-heatmap"))
     return tasks
+
+
 def build_figures_cnmf_program_top_genes_tasks(config: LoadedConfig) -> list[Task]:
     resolved = _resolve_figures_cnmf_program_top_genes(config)
     tables_dir = resolved.output_dir / "tables"
@@ -2031,6 +2113,65 @@ def build_figures_cnmf_program_enrichment_tasks(config: LoadedConfig) -> list[Ta
     return tasks
 
 
+def build_figures_trait_program_gene_panel_tasks(config: LoadedConfig) -> list[Task]:
+    resolved = _resolve_figures_trait_program_gene_panel(config)
+    tables_dir = resolved.output_dir / "tables"
+    plots_dir = resolved.output_dir / "plots"
+    meta_dir = resolved.output_dir / "meta"
+    tasks: list[Task] = [
+        _ensure_directory_task(tables_dir, "figures-trait-program-gene-panel tables"),
+        _ensure_directory_task(plots_dir, "figures-trait-program-gene-panel plots"),
+        _ensure_directory_task(meta_dir, "figures-trait-program-gene-panel meta"),
+    ]
+
+    manifest_rows: list[dict[str, str]] = []
+    for target in resolved.targets:
+        table_prefix = tables_dir / target.source_id
+        plot_prefix = plots_dir / target.source_id
+        command = _rscript_command(
+            resolved.config,
+            "trait_program_gene_panel.R",
+            resolved.program_association_dir,
+            resolved.regulation_dir,
+            resolved.spectra_path,
+            resolved.gene_map,
+            target.posterior_path,
+            target.source_id,
+            resolved.k,
+            table_prefix,
+            plot_prefix,
+            resolved.max_programs,
+            resolved.max_genes_per_side,
+            resolved.hit_abs_gamma_threshold,
+            resolved.loading_top_n,
+            resolved.regulator_fdr_threshold,
+            resolved.min_abs_score,
+            int(resolved.render_plot),
+        )
+        tasks.append(
+            Task(
+                name=f"Render trait-program-gene panel for {target.source_id}",
+                preview=preview_command(command),
+                command=command,
+            )
+        )
+        manifest_rows.append(
+            {
+                "figure_id": target.source_id,
+                "figure_kind": "trait_program_gene_panel",
+                "source_id": target.source_id,
+                "trait_stem": target.trait_stem,
+                "table_long_path": f"{table_prefix}_long.tsv",
+                "table_program_path": f"{table_prefix}_programs.tsv",
+                "plot_pdf": str(plot_prefix.with_suffix(".pdf")) if resolved.render_plot else "",
+                "plot_png": str(plot_prefix.with_suffix(".png")) if resolved.render_plot else "",
+            }
+        )
+
+    tasks.append(_write_manifest_task(meta_dir / "manifest.tsv", manifest_rows, "figures-trait-program-gene-panel"))
+    return tasks
+
+
 def _consolidate_manifests_task(config: LoadedConfig, figure_kinds: list[str]) -> Task:
     """Produce a single ``manifest_all.tsv`` that merges every sub-workflow manifest."""
     figures_root = config.resolve_path_or_artifact(None)
@@ -2109,6 +2250,9 @@ def build_figures_tasks(config: LoadedConfig) -> list[Task]:
     if figures.get("cnmf_program_enrichment"):
         tasks.extend(build_figures_cnmf_program_enrichment_tasks(config))
         active_kinds.append("cnmf_program_enrichment")
+    if figures.get("trait_program_gene_panel"):
+        tasks.extend(build_figures_trait_program_gene_panel_tasks(config))
+        active_kinds.append("trait_program_gene_panel")
     if not tasks:
         raise ConfigError("workflows.figures must contain at least one configured subworkflow")
 
@@ -2131,6 +2275,7 @@ __all__ = [
     "build_figures_program_heatmap_tasks",
     "build_figures_cnmf_program_top_genes_tasks",
     "build_figures_cnmf_program_enrichment_tasks",
+    "build_figures_trait_program_gene_panel_tasks",
     "build_figures_tasks",
 ]
 

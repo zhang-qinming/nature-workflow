@@ -487,3 +487,94 @@ read_regulation_matrices <- function(regulation_dir, k) {
 
   list(beta = beta_df, p = p_df)
 }
+
+read_spectra_top_genes <- function(spectra_path, gene_map_path, k, top_n) {
+  spectra_raw <- data.table::fread(spectra_path, data.table = FALSE)
+  if (ncol(spectra_raw) < 1) {
+    stop(sprintf("cNMF spectra at %s is empty", spectra_path))
+  }
+
+  if (is.character(spectra_raw[[1]])) {
+    row.names(spectra_raw) <- spectra_raw[[1]]
+    spectra_raw <- spectra_raw[, -1, drop = FALSE]
+  }
+  spectra_mat <- t(as.matrix(spectra_raw))
+  actual_k <- ncol(spectra_mat)
+  colnames(spectra_mat) <- paste0("P", seq_len(actual_k))
+
+  lookups <- build_gene_id_lookups(gene_map_path)
+  gene_symbols <- unname(lookups$gene_lookup[normalize_ensg_ids(row.names(spectra_mat))])
+  missing_gene <- is.na(gene_symbols) | !nzchar(gene_symbols)
+  gene_symbols[missing_gene] <- row.names(spectra_mat)[missing_gene]
+
+  rows <- list()
+  for (program_index in seq_len(min(k, actual_k))) {
+    program_name <- paste0("P", program_index)
+    tmp <- data.frame(
+      gene = gene_symbols,
+      weight = as.numeric(spectra_mat[, program_index]),
+      stringsAsFactors = FALSE
+    )
+    tmp <- tmp[order(tmp$weight, decreasing = TRUE, na.last = NA), , drop = FALSE]
+    tmp <- tmp[nzchar(tmp$gene) & !duplicated(tmp$gene), , drop = FALSE]
+    if (nrow(tmp) == 0) {
+      next
+    }
+    tmp <- head(tmp, top_n)
+    tmp$Program <- program_name
+    tmp$rank_within_side <- seq_len(nrow(tmp))
+    rows[[length(rows) + 1]] <- tmp
+  }
+
+  if (length(rows) == 0) {
+    return(data.frame(
+      Program = character(),
+      gene = character(),
+      weight = numeric(),
+      rank_within_side = integer(),
+      stringsAsFactors = FALSE
+    ))
+  }
+
+  do.call(rbind, rows)
+}
+
+read_regulator_long <- function(regulation_dir, k) {
+  rows <- list()
+  for (program_index in seq_len(k)) {
+    program_path <- file.path(regulation_dir, paste0("K", k, "_program", program_index, "_perturb_effects.txt"))
+    tmp <- data.table::fread(program_path, data.table = FALSE)
+    if (ncol(tmp) < 3) {
+      stop(sprintf("Regulation file %s must have at least 3 columns", program_path))
+    }
+    colnames(tmp)[1:3] <- c("gene", "beta", "p")
+    tmp$Program <- paste0("P", program_index)
+    rows[[length(rows) + 1]] <- tmp[, c("Program", "gene", "beta", "p")]
+  }
+
+  if (length(rows) == 0) {
+    return(data.frame(
+      Program = character(),
+      gene = character(),
+      beta = numeric(),
+      p = numeric(),
+      fdr = numeric(),
+      stringsAsFactors = FALSE
+    ))
+  }
+
+  regulator_df <- do.call(rbind, rows)
+  regulator_df$fdr <- stats::ave(
+    regulator_df$p,
+    regulator_df$Program,
+    FUN = function(values) stats::p.adjust(values, method = "BH")
+  )
+  regulator_df
+}
+
+truncate_gene_label <- function(label, max_chars = 16) {
+  label <- as.character(label)
+  too_long <- nchar(label) > max_chars
+  label[too_long] <- paste0(substr(label[too_long], 1, max_chars - 1), "\u2026")
+  label
+}

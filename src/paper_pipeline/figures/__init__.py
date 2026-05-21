@@ -10,6 +10,7 @@ from .workflows import (
     build_figures_gwas_manhattan_tasks,
     build_figures_program_rankings_tasks,
     build_figures_program_heatmap_tasks,
+    build_figures_trait_program_gene_panel_tasks,
     build_figures_tasks,
 )
 
@@ -25,5 +26,6 @@ __all__ = [
     "build_figures_gwas_manhattan_tasks",
     "build_figures_program_rankings_tasks",
     "build_figures_program_heatmap_tasks",
+    "build_figures_trait_program_gene_panel_tasks",
     "build_figures_tasks",
 ]

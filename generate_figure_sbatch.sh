@@ -54,6 +54,12 @@ FIGURE_GENE_LEVEL_SCATTER_CPUS="${FIGURE_GENE_LEVEL_SCATTER_CPUS:-${FIGURE_DEFAU
 FIGURE_GENE_LEVEL_SCATTER_PARTITION="${FIGURE_GENE_LEVEL_SCATTER_PARTITION:-${FIGURE_DEFAULT_PARTITION}}"
 FIGURE_GENE_LEVEL_SCATTER_TIME="${FIGURE_GENE_LEVEL_SCATTER_TIME:-${FIGURE_DEFAULT_TIME}}"
 
+# --- Trait-Program-Gene panel ---
+FIGURE_TRAIT_PROGRAM_GENE_PANEL_MEM="${FIGURE_TRAIT_PROGRAM_GENE_PANEL_MEM:-8G}"
+FIGURE_TRAIT_PROGRAM_GENE_PANEL_CPUS="${FIGURE_TRAIT_PROGRAM_GENE_PANEL_CPUS:-${FIGURE_DEFAULT_CPUS}}"
+FIGURE_TRAIT_PROGRAM_GENE_PANEL_PARTITION="${FIGURE_TRAIT_PROGRAM_GENE_PANEL_PARTITION:-${FIGURE_DEFAULT_PARTITION}}"
+FIGURE_TRAIT_PROGRAM_GENE_PANEL_TIME="${FIGURE_TRAIT_PROGRAM_GENE_PANEL_TIME:-${FIGURE_DEFAULT_TIME}}"
+
 # --- Program 排名条形图 ---
 FIGURE_PROGRAM_RANKINGS_MEM="${FIGURE_PROGRAM_RANKINGS_MEM:-4G}"
 FIGURE_PROGRAM_RANKINGS_CPUS="${FIGURE_PROGRAM_RANKINGS_CPUS:-1}"
@@ -144,6 +150,7 @@ FIGURE_ENABLE_CROSS_TRAIT_HEATMAP="${FIGURE_ENABLE_CROSS_TRAIT_HEATMAP:-1}"
 FIGURE_ENABLE_GWAS_LOCUS_ZOOM="${FIGURE_ENABLE_GWAS_LOCUS_ZOOM:-auto}"
 FIGURE_ENABLE_CNMF_PROGRAM_TOP_GENES="${FIGURE_ENABLE_CNMF_PROGRAM_TOP_GENES:-1}"
 FIGURE_ENABLE_CNMF_PROGRAM_ENRICHMENT="${FIGURE_ENABLE_CNMF_PROGRAM_ENRICHMENT:-1}"
+FIGURE_ENABLE_TRAIT_PROGRAM_GENE_PANEL="${FIGURE_ENABLE_TRAIT_PROGRAM_GENE_PANEL:-1}"
 
 # ============================================================
 # 图参数
@@ -155,6 +162,13 @@ FIGURE_GENE_LEVEL_TOP_N="${FIGURE_GENE_LEVEL_TOP_N:-8}"
 FIGURE_GENE_LEVEL_Y_LIMIT="${FIGURE_GENE_LEVEL_Y_LIMIT:-8}"
 FIGURE_QQ_Y_LIMIT="${FIGURE_QQ_Y_LIMIT:-10}"
 FIGURE_QQ_RENDER_PLOT="${FIGURE_QQ_RENDER_PLOT:-0}"
+FIGURE_TRAIT_PANEL_MAX_PROGRAMS="${FIGURE_TRAIT_PANEL_MAX_PROGRAMS:-8}"
+FIGURE_TRAIT_PANEL_MAX_GENES_PER_SIDE="${FIGURE_TRAIT_PANEL_MAX_GENES_PER_SIDE:-8}"
+FIGURE_TRAIT_PANEL_HIT_ABS_GAMMA_THRESHOLD="${FIGURE_TRAIT_PANEL_HIT_ABS_GAMMA_THRESHOLD:-0.1}"
+FIGURE_TRAIT_PANEL_LOADING_TOP_N="${FIGURE_TRAIT_PANEL_LOADING_TOP_N:-200}"
+FIGURE_TRAIT_PANEL_REGULATOR_FDR_THRESHOLD="${FIGURE_TRAIT_PANEL_REGULATOR_FDR_THRESHOLD:-0.05}"
+FIGURE_TRAIT_PANEL_MIN_ABS_SCORE="${FIGURE_TRAIT_PANEL_MIN_ABS_SCORE:-1.3}"
+FIGURE_TRAIT_PANEL_RENDER_PLOT="${FIGURE_TRAIT_PANEL_RENDER_PLOT:-1}"
 FIGURE_GWAS_FLANK_BP="${FIGURE_GWAS_FLANK_BP:-50000}"
 FIGURE_GWAS_LABEL_P_THRESHOLD="${FIGURE_GWAS_LABEL_P_THRESHOLD:-1e-30}"
 FIGURE_GWAS_GENOMEWIDE_THRESHOLD="${FIGURE_GWAS_GENOMEWIDE_THRESHOLD:-5e-8}"
@@ -602,6 +616,27 @@ append_gene_level_qq_section() {
 EOF
 }
 
+append_trait_program_gene_panel_section() {
+    local config_path="$1" lof_id="$2"
+    cat >> "${config_path}" <<EOF
+    trait_program_gene_panel:
+      inputs:
+        program_association_dir: $(yaml_quote "${FIGURE_PROGRAM_ASSOCIATION_DIR}")
+        regulation_dir: $(yaml_quote "${FIGURE_CNMF_REGULATION_DIR}")
+        spectra_path: $(yaml_quote "${FIGURE_SPECTRA_PATH}")
+      parameters:
+        lof_ids: [$(yaml_quote "${lof_id}")]
+        k: ${FIGURE_CNMF_K}
+        max_programs: ${FIGURE_TRAIT_PANEL_MAX_PROGRAMS}
+        max_genes_per_side: ${FIGURE_TRAIT_PANEL_MAX_GENES_PER_SIDE}
+        hit_abs_gamma_threshold: ${FIGURE_TRAIT_PANEL_HIT_ABS_GAMMA_THRESHOLD}
+        loading_top_n: ${FIGURE_TRAIT_PANEL_LOADING_TOP_N}
+        regulator_fdr_threshold: ${FIGURE_TRAIT_PANEL_REGULATOR_FDR_THRESHOLD}
+        min_abs_score: ${FIGURE_TRAIT_PANEL_MIN_ABS_SCORE}
+        render_plot: ${FIGURE_TRAIT_PANEL_RENDER_PLOT}
+EOF
+}
+
 append_program_rankings_section() {
     local config_path="$1" lof_id="$2" trait_file="$3"
     cat >> "${config_path}" <<EOF
@@ -674,6 +709,9 @@ _fig_gen_one_lof() {
     if is_truthy "${FIGURE_ENABLE_GENE_LEVEL_QQ}"; then
         append_gene_level_qq_section "${config_path}" "${lof_id}"
     fi
+    if is_truthy "${FIGURE_ENABLE_TRAIT_PROGRAM_GENE_PANEL}"; then
+        append_trait_program_gene_panel_section "${config_path}" "${lof_id}"
+    fi
 
     if is_truthy "${FIGURE_ENABLE_CNMF}"; then
         script_path="${lof_dir}/figures_cnmf_${lof_id}.sh"
@@ -716,6 +754,13 @@ _fig_gen_one_lof() {
             "${FIGURE_GENE_LEVEL_QQ_MEM}" "${FIGURE_GENE_LEVEL_QQ_CPUS}" \
             "${FIGURE_GENE_LEVEL_QQ_PARTITION}" "${FIGURE_GENE_LEVEL_QQ_TIME}" \
             "figures-gene-level-qq" "${config_path}" "gene_level_qq"
+    fi
+    if is_truthy "${FIGURE_ENABLE_TRAIT_PROGRAM_GENE_PANEL}"; then
+        script_path="${lof_dir}/figures_tpgp_${lof_id}.sh"
+        write_slurm_script "${script_path}" "fig_tpgp_${lof_id}" \
+            "${FIGURE_TRAIT_PROGRAM_GENE_PANEL_MEM}" "${FIGURE_TRAIT_PROGRAM_GENE_PANEL_CPUS}" \
+            "${FIGURE_TRAIT_PROGRAM_GENE_PANEL_PARTITION}" "${FIGURE_TRAIT_PROGRAM_GENE_PANEL_TIME}" \
+            "figures-trait-program-gene-panel" "${config_path}" "trait_program_gene_panel"
     fi
 }
 

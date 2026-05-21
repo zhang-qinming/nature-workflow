@@ -352,6 +352,19 @@ workflows:
         output_id: GCST90081631__GCST90084301
         method: pearson
 
+    trait_program_gene_panel:
+      # inputs.file_id_map inherited from shared_inputs.
+      parameters:
+        lof_ids: [GCST90081631]
+        k: 60
+        max_programs: 8
+        max_genes_per_side: 8
+        hit_abs_gamma_threshold: 0.1
+        loading_top_n: 200
+        regulator_fdr_threshold: 0.05
+        min_abs_score: 1.3
+        render_plot: true
+
     program_heatmap:
       # parameters.k inherited from shared_parameters.
       parameters:

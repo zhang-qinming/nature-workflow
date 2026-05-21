@@ -1,0 +1,23 @@
+project_root: ../..
+artifact_root: /gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all/outputs
+
+executables:
+  plot_rscript:
+    - conda
+    - run
+    - --no-capture-output
+    - -n
+    - paper-pipeline-plot
+    - Rscript
+
+workflows:
+  figures:
+    shared_inputs:
+      file_id_map: ../../configs/path.file_id_map.tsv
+      posterior_dir: /gpfs/chencao/qinminzhang/workflow/catalog_lof/run_all/outputs/genebayes/posterior
+      gene_map: /gpfs/chencao/qinminzhang/Nature/mine/code/data/gencode_v41_gname_gid_ALL_sorted_onlyID
+      spectra_path: /gpfs/chencao/qinminzhang/Nature/mine/code/outputs/perturbseq/cnmf_genomewide/cNMF/cNMF_all/cNMF_all.gene_spectra_score.k_60.dt_0_5.txt
+      regulation_dir: /gpfs/chencao/qinminzhang/Nature/mine/code/outputs/perturbseq/cnmf_genomewide/cNMF_regulation/K562GW
+      program_association_dir: /gpfs/chencao/qinminzhang/workflow/catalog_lof/run_all/outputs/perturbseq/cnmf_genomewide/trait_association/K562GW/ProgramLevel
+
+    shared_parameters: {}

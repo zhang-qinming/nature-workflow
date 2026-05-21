@@ -44,6 +44,7 @@ from .figures.workflows import (
     build_figures_gwas_manhattan_tasks,
     build_figures_program_rankings_tasks,
     build_figures_program_heatmap_tasks,
+    build_figures_trait_program_gene_panel_tasks,
     build_figures_tasks,
 )
 from .plot.workflows import (
@@ -102,6 +103,7 @@ WORKFLOW_BUILDERS: dict[str, WorkflowBuilder] = {
     "figures-gwas-manhattan": build_figures_gwas_manhattan_tasks,
     "figures-program-rankings": build_figures_program_rankings_tasks,
     "figures-program-heatmap": build_figures_program_heatmap_tasks,
+    "figures-trait-program-gene-panel": build_figures_trait_program_gene_panel_tasks,
 }
 
 
