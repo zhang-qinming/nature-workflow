@@ -7,7 +7,6 @@ PROJECT_ROOT="${PROJECT_ROOT:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 FILE_ID_MAP="${FILE_ID_MAP:-${PROJECT_ROOT}/configs/path.file_id_map.tsv}"
 
 TASK_NAME="${TASK_NAME:-cnmf}"
-CNMF_CORREGULATION_PAIRS="${CNMF_CORREGULATION_PAIRS:-}"
 
 OUTPUT_ROOT="${OUTPUT_ROOT:-/gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all/outputs}"
 OUTPUT_DIR="${OUTPUT_DIR:-${OUTPUT_ROOT}/cnmf}"
@@ -22,26 +21,6 @@ MANIFEST_OUT="${MANIFEST_OUT:-${META_DIR}/manifest_all.tsv}"
 mkdir -p "${META_DIR}"
 
 mapfile -t ALL_IDS < <(awk -F '\t' 'NR > 1 { sub(/\r$/, "", $2); print $2 }' "${FILE_ID_MAP}")
-
-parse_pairs() {
-    local raw="$1"
-    if [ -z "${raw}" ]; then
-        return 0
-    fi
-    IFS=',' read -ra entries <<< "${raw}"
-    for entry in "${entries[@]}"; do
-        entry="$(printf '%s' "${entry}" | xargs)"
-        [ -n "${entry}" ] || continue
-        if [[ "${entry}" == *:* ]]; then
-            local pair_name="${entry%%:*}"
-            printf '%s\n' "${pair_name}"
-        else
-            local pair_name="${entry//:/__}"
-            pair_name="${pair_name//|/_}"
-            printf '%s\n' "${pair_name}"
-        fi
-    done
-}
 
 {
     printf 'figure_id\tfigure_kind\tsource_id\ttable_path\tplot_pdf\tplot_png\tstatus\n'
@@ -62,25 +41,6 @@ parse_pairs() {
             "${plot_png}" \
             "${status}"
     done
-
-    while IFS= read -r pair_id; do
-        [ -n "${pair_id}" ] || continue
-        table_path="${TABLES_DIR}/corregulation/${pair_id}.tsv"
-        plot_pdf="${PLOTS_DIR}/corregulation/${pair_id}.pdf"
-        plot_png=""
-        pair_status="missing"
-        if [ -f "${table_path}" ] || [ -f "${plot_pdf}" ]; then
-            pair_status="ok"
-        fi
-        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-            "${pair_id}" \
-            "cnmf_corregulation_scatter" \
-            "${pair_id}" \
-            "${table_path}" \
-            "${plot_pdf}" \
-            "${plot_png}" \
-            "${pair_status}"
-    done < <(parse_pairs "${CNMF_CORREGULATION_PAIRS}")
 } > "${MANIFEST_OUT}"
 
 echo "Manifest written: ${MANIFEST_OUT}"

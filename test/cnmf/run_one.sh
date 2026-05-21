@@ -103,8 +103,12 @@ with open(shared["file_id_map"], encoding="utf-8") as handle:
         parts = line.rstrip("\n\r").split("\t")
         if len(parts) >= 4 and parts[1] == lof_id:
             trait_source = parts[3].strip()
-            trait_stem = Path(trait_source).stem
-            trait_file = f"{trait_stem}.per_gene_estimates.tsv"
+            trait_name = Path(trait_source).name
+            if trait_name.endswith(".per_gene_estimates.tsv"):
+                trait_file = trait_name
+            else:
+                trait_stem = Path(trait_source).stem
+                trait_file = f"{trait_stem}.per_gene_estimates.tsv"
             break
 if not trait_file:
     raise SystemExit(f"Unable to resolve trait file for {lof_id} from {shared['file_id_map']}")

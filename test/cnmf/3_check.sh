@@ -81,15 +81,6 @@ if command -v squeue >/dev/null 2>&1; then
     r_count="$(squeue -u "${USER}" -h -t R -n "${JOB_NAME}" 2>/dev/null | wc -l)"
 fi
 
-cor_table_count=0
-cor_plot_count=0
-if [ -d "${OUTPUT_DIR}/tables/corregulation" ]; then
-    cor_table_count="$(find "${OUTPUT_DIR}/tables/corregulation" -maxdepth 1 -type f -name '*.tsv' | wc -l)"
-fi
-if [ -d "${OUTPUT_DIR}/plots/corregulation" ]; then
-    cor_plot_count="$(find "${OUTPUT_DIR}/plots/corregulation" -maxdepth 1 -type f -name '*.pdf' | wc -l)"
-fi
-
 echo "============================================"
 echo "cNMF figure status"
 echo "============================================"
@@ -107,8 +98,6 @@ echo "R queue:   ${r_count}"
 echo ""
 echo "Program-regulator TSV: ${table_program_reg}"
 echo "Program-regulator PDF: ${plot_program_reg}"
-echo "Corregulation TSV:     ${cor_table_count}"
-echo "Corregulation PDF:     ${cor_plot_count}"
 
 if [ "${failed}" -gt 0 ]; then
     echo ""
