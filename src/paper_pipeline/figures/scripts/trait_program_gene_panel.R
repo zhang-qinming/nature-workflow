@@ -57,6 +57,19 @@ make_empty_side_hits <- function() {
   )
 }
 
+head_by_program <- function(df, max_rows) {
+  if (is.null(df) || nrow(df) == 0) {
+    return(df[0, , drop = FALSE])
+  }
+  groups <- split(df, df$Program, drop = TRUE)
+  if (length(groups) == 0) {
+    return(df[0, , drop = FALSE])
+  }
+  out <- do.call(rbind, lapply(groups, function(group_df) head(group_df, max_rows)))
+  row.names(out) <- NULL
+  out
+}
+
 write_placeholder_plot <- function(program_summary, plot_prefix, trait_id, max_genes_per_side, message_text) {
   ensure_parent_dir(paste0(plot_prefix, ".pdf"))
   library(ggplot2)
@@ -202,12 +215,9 @@ if (nrow(loading_hits) > 0) {
     ties.method = "first"
   )
   loading_hits <- loading_hits[order(loading_hits$Program, loading_hits$effect_rank, loading_hits$rank_within_side), , drop = FALSE]
-  loading_hits <- do.call(
-    rbind,
-    lapply(split(loading_hits, loading_hits$Program), function(df) head(df, max_genes_per_side))
-  )
+  loading_hits <- head_by_program(loading_hits, max_genes_per_side)
 } else {
-  loading_hits <- data.frame()
+  loading_hits <- loading_hits[0, , drop = FALSE]
 }
 
 regulator_hits <- merge(
@@ -227,12 +237,9 @@ if (nrow(regulator_hits) > 0) {
     ties.method = "first"
   )
   regulator_hits <- regulator_hits[order(regulator_hits$Program, regulator_hits$effect_rank, regulator_hits$rank_within_side), , drop = FALSE]
-  regulator_hits <- do.call(
-    rbind,
-    lapply(split(regulator_hits, regulator_hits$Program), function(df) head(df, max_genes_per_side))
-  )
+  regulator_hits <- head_by_program(regulator_hits, max_genes_per_side)
 } else {
-  regulator_hits <- data.frame()
+  regulator_hits <- regulator_hits[0, , drop = FALSE]
 }
 
 side_hit_cols <- c("Program", "side", "gene", "ensg", "post_mean", "abs_gamma", "gamma_sign", "membership_score", "rank_within_side")
