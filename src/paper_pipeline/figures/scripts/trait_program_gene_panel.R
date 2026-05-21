@@ -72,11 +72,15 @@ regulator_df <- read_regulator_long(regulation_dir, k)
 regulator_df <- regulator_df[regulator_df$Program %in% selected_programs, , drop = FALSE]
 regulator_df <- regulator_df[regulator_df$fdr <= regulator_fdr_threshold, , drop = FALSE]
 regulator_df <- regulator_df[order(regulator_df$Program, regulator_df$fdr, -abs(regulator_df$beta), regulator_df$gene), , drop = FALSE]
-regulator_df$rank_within_side <- ave(
-  regulator_df$fdr,
-  regulator_df$Program,
-  FUN = function(x) seq_along(x)
-)
+if (nrow(regulator_df) > 0) {
+  regulator_df$rank_within_side <- ave(
+    regulator_df$fdr,
+    regulator_df$Program,
+    FUN = function(x) seq_along(x)
+  )
+} else {
+  regulator_df$rank_within_side <- numeric()
+}
 
 trait_hits <- posterior_df[!is.na(posterior_df$abs_gamma) & posterior_df$abs_gamma >= hit_abs_gamma_threshold, , drop = FALSE]
 if (nrow(trait_hits) == 0) {
@@ -90,17 +94,17 @@ loading_hits <- merge(
   by = "gene",
   all = FALSE
 )
-loading_hits$side <- "program_loading"
-loading_hits$membership_score <- loading_hits$weight
-loading_hits$effect_score <- loading_hits$post_mean
-loading_hits$effect_rank <- ave(
-  -loading_hits$abs_gamma,
-  loading_hits$Program,
-  FUN = rank,
-  ties.method = "first"
-)
-loading_hits <- loading_hits[order(loading_hits$Program, loading_hits$effect_rank, loading_hits$rank_within_side), , drop = FALSE]
 if (nrow(loading_hits) > 0) {
+  loading_hits$side <- "program_loading"
+  loading_hits$membership_score <- loading_hits$weight
+  loading_hits$effect_score <- loading_hits$post_mean
+  loading_hits$effect_rank <- ave(
+    -loading_hits$abs_gamma,
+    loading_hits$Program,
+    FUN = rank,
+    ties.method = "first"
+  )
+  loading_hits <- loading_hits[order(loading_hits$Program, loading_hits$effect_rank, loading_hits$rank_within_side), , drop = FALSE]
   loading_hits <- do.call(
     rbind,
     lapply(split(loading_hits, loading_hits$Program), function(df) head(df, max_genes_per_side))
@@ -115,17 +119,17 @@ regulator_hits <- merge(
   by = "gene",
   all = FALSE
 )
-regulator_hits$side <- "regulator"
-regulator_hits$membership_score <- regulator_hits$beta
-regulator_hits$effect_score <- regulator_hits$post_mean
-regulator_hits$effect_rank <- ave(
-  -regulator_hits$abs_gamma,
-  regulator_hits$Program,
-  FUN = rank,
-  ties.method = "first"
-)
-regulator_hits <- regulator_hits[order(regulator_hits$Program, regulator_hits$effect_rank, regulator_hits$rank_within_side), , drop = FALSE]
 if (nrow(regulator_hits) > 0) {
+  regulator_hits$side <- "regulator"
+  regulator_hits$membership_score <- regulator_hits$beta
+  regulator_hits$effect_score <- regulator_hits$post_mean
+  regulator_hits$effect_rank <- ave(
+    -regulator_hits$abs_gamma,
+    regulator_hits$Program,
+    FUN = rank,
+    ties.method = "first"
+  )
+  regulator_hits <- regulator_hits[order(regulator_hits$Program, regulator_hits$effect_rank, regulator_hits$rank_within_side), , drop = FALSE]
   regulator_hits <- do.call(
     rbind,
     lapply(split(regulator_hits, regulator_hits$Program), function(df) head(df, max_genes_per_side))
