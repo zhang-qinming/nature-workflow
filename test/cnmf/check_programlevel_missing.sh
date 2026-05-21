@@ -52,7 +52,14 @@ find_existing_file() {
 while IFS=$'\t' read -r id1 id2 path1 path2; do
     path2="${path2%$'\r'}"
     source_file="$(basename "${path2}")"
-    trait_file="${source_file}.per_gene_estimates.tsv"
+    trait_stem="${source_file}"
+    trait_stem="${trait_stem%.summary_statistics.csv}"
+    trait_stem="${trait_stem%.per_gene_estimates.tsv}"
+    trait_stem="${trait_stem%.tsv.gz}"
+    trait_stem="${trait_stem%.txt.gz}"
+    trait_stem="${trait_stem%.csv}"
+    trait_file="${trait_stem}.per_gene_estimates.tsv"
+    source_posterior_file="${source_file}.per_gene_estimates.tsv"
     legacy_trait_file="${source_file}"
 
     for item in \
@@ -65,10 +72,10 @@ while IFS=$'\t' read -r id1 id2 path1 path2; do
 
         missing_programs=0
         missing_regulators=0
-        if ! find_existing_file "${dir}" "programs_enrichment_K${K}_" "${trait_file}" "${legacy_trait_file}" >/dev/null; then
+        if ! find_existing_file "${dir}" "programs_enrichment_K${K}_" "${trait_file}" "${source_posterior_file}" "${legacy_trait_file}" >/dev/null; then
             missing_programs=1
         fi
-        if ! find_existing_file "${dir}" "regulators_enrichment_K${K}_" "${trait_file}" "${legacy_trait_file}" >/dev/null; then
+        if ! find_existing_file "${dir}" "regulators_enrichment_K${K}_" "${trait_file}" "${source_posterior_file}" "${legacy_trait_file}" >/dev/null; then
             missing_regulators=1
         fi
 
