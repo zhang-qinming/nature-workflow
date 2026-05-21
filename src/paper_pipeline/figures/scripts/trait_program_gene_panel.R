@@ -159,6 +159,37 @@ resolve_association_trait_file <- function(association_dir, association_trait_fi
   association_trait_file
 }
 
+annotate_program_summary <- function(program_summary) {
+  program_summary$Program <- normalize_program_ids(program_summary$Program)
+  bonferroni_cutoff <- if (nrow(program_summary) > 0) 0.05 / nrow(program_summary) else Inf
+
+  program_summary$program_sig <- !is.na(program_summary$MEANgamma_top100_shet_adjusted_P) &
+    program_summary$MEANgamma_top100_shet_adjusted_P < bonferroni_cutoff
+  program_summary$regulator_sig <- !is.na(program_summary$P_withShet) &
+    program_summary$P_withShet < bonferroni_cutoff
+  program_summary$priority_tier <- ifelse(
+    program_summary$program_sig & program_summary$regulator_sig,
+    1,
+    ifelse(program_summary$program_sig | program_summary$regulator_sig, 2, 3)
+  )
+  program_summary$priority_score <- pmax(abs(program_summary$program_score), abs(program_summary$regulator_score), na.rm = TRUE)
+  program_summary$priority_score[is.na(program_summary$priority_score)] <- 0
+  program_summary$color <- ifelse(
+    program_summary$program_sig & program_summary$regulator_sig,
+    "both_enriched",
+    ifelse(
+      program_summary$program_sig,
+      "program_enriched",
+      ifelse(program_summary$regulator_sig, "regulator_enriched", "other")
+    )
+  )
+  program_summary$color <- factor(
+    program_summary$color,
+    levels = c("other", "program_enriched", "regulator_enriched", "both_enriched")
+  )
+  program_summary
+}
+
 posterior_df <- data.table::fread(posterior_path, data.table = FALSE)
 if (!all(c("ensg", "post_mean") %in% names(posterior_df))) {
   stop(sprintf("Posterior file %s must have columns: ensg, post_mean", posterior_path))
@@ -176,14 +207,7 @@ trait_file <- resolve_association_trait_file(program_association_dir, associatio
 message(sprintf("Using ProgramLevel association trait file: %s", trait_file))
 message(sprintf("Using posterior file: %s", basename(posterior_path)))
 program_summary <- read_program_regulator_summary(program_association_dir, trait_file, k, character())
-program_summary$Program <- normalize_program_ids(program_summary$Program)
-program_summary$program_sig <- program_summary$MEANgamma_top100_shet_adjusted_P < 0.05 / nrow(program_summary)
-program_summary$regulator_sig <- program_summary$P_withShet < 0.05 / nrow(program_summary)
-program_summary$priority_tier <- ifelse(
-  program_summary$program_sig & program_summary$regulator_sig, 1,
-  ifelse(program_summary$program_sig | program_summary$regulator_sig, 2, 3)
-)
-program_summary$priority_score <- pmax(abs(program_summary$program_score), abs(program_summary$regulator_score))
+program_summary <- annotate_program_summary(program_summary)
 program_summary <- program_summary[order(program_summary$priority_tier, -program_summary$priority_score, program_summary$Program), , drop = FALSE]
 program_summary <- program_summary[
   program_summary$priority_tier < 3 | program_summary$priority_score >= min_abs_score,
@@ -192,8 +216,7 @@ program_summary <- program_summary[
 ]
 if (nrow(program_summary) == 0) {
   program_summary <- read_program_regulator_summary(program_association_dir, trait_file, k, character())
-  program_summary$Program <- normalize_program_ids(program_summary$Program)
-  program_summary$priority_score <- pmax(abs(program_summary$program_score), abs(program_summary$regulator_score))
+  program_summary <- annotate_program_summary(program_summary)
   program_summary <- program_summary[order(-program_summary$priority_score, program_summary$Program), , drop = FALSE]
 }
 program_summary <- head(program_summary, max_programs)
@@ -475,18 +498,16 @@ program_plot$program_effect_raw <- ifelse(use_program_score, program_plot$progra
 program_plot$program_effect_score <- cap_nonfinite_scores(program_plot$program_effect_raw)
 program_effect_max <- max(abs(program_plot$program_effect_score), 1, na.rm = TRUE)
 program_plot$program_direction <- sign(program_plot$program_effect_score)
-program_plot$effect_color <- signed_value_color(program_plot$program_effect_score, program_effect_max)
-program_plot$effect_alpha <- 0.40 + 0.55 * pmin(1, abs(program_plot$program_effect_score) / program_effect_max)
-program_plot$effect_width <- 0.55 + 1.8 * pmin(1, abs(program_plot$program_effect_score) / program_effect_max)
-program_plot$program_node_label <- sprintf(
-  "%s | B:%s | R:%s\nL:%d  R:%d",
-  program_plot$Program,
+program_plot$effect_color <- "#374151"
+program_plot$effect_alpha <- 0.32 + 0.58 * pmin(1, abs(program_plot$program_effect_score) / program_effect_max)
+program_plot$effect_width <- 0.45 + 1.45 * pmin(1, abs(program_plot$program_effect_score) / program_effect_max)
+program_plot$program_node_label <- program_plot$Program
+program_plot$score_label <- sprintf(
+  "B:%s  R:%s",
   format_signed_score(program_plot$program_score),
-  format_signed_score(program_plot$regulator_score),
-  program_plot$loading_gene_count,
-  program_plot$regulator_gene_count
+  format_signed_score(program_plot$regulator_score)
 )
-program_plot$effect_y <- program_plot$y_row + row_spacing * 0.24
+program_plot$effect_y <- program_plot$y_row + row_spacing * 0.20
 program_plot$effect_x0 <- -0.38
 program_plot$effect_x1 <- 0.38
 
@@ -516,8 +537,8 @@ gene_plot$label_hjust <- ifelse(gene_plot$side == "program_loading", 1, 0)
 gene_plot$post_mean_plot <- ifelse(is.finite(gene_plot$post_mean), gene_plot$post_mean, 0)
 gene_gamma_max <- max(abs(gene_plot$post_mean_plot), hit_abs_gamma_threshold, na.rm = TRUE)
 gene_plot$gene_color <- signed_value_color(gene_plot$post_mean_plot, gene_gamma_max)
-gene_plot$branch_alpha <- 0.28 + 0.60 * pmin(1, abs(gene_plot$post_mean_plot) / gene_gamma_max)
-gene_plot$abs_gamma_plot <- pmax(abs(gene_plot$post_mean_plot), 0)
+gene_plot$branch_alpha <- 0.18 + 0.24 * pmin(1, abs(gene_plot$post_mean_plot) / gene_gamma_max)
+gene_plot$point_size <- 1.65 + 1.15 * pmin(1, abs(gene_plot$post_mean_plot) / gene_gamma_max)
 
 pos_effects <- program_plot[program_plot$program_direction > 0, , drop = FALSE]
 neg_effects <- program_plot[program_plot$program_direction < 0, , drop = FALSE]
@@ -535,10 +556,10 @@ plot_y_min <- y_legend - row_spacing * 0.58
 plot_y_max <- y_trait + row_spacing * 0.50
 plot_x_min <- -5.15
 plot_x_max <- 5.15
-plot_width <- max(13.5, min(18.5, 12.4 + max_genes_per_side * 0.35))
+plot_width <- max(12.8, min(17.0, 11.8 + max_genes_per_side * 0.28))
 plot_height <- max(7.8, min(16.5, 3.2 + panel_rows * 0.92))
 gene_text_size <- max(2.6, min(3.7, 4.2 - max_genes_per_side * 0.11))
-program_text_size <- max(2.55, min(3.35, 3.75 - panel_rows * 0.055))
+program_text_size <- max(3.0, min(4.0, 4.25 - panel_rows * 0.045))
 
 heading_df <- data.frame(
   x = c(-3.45, 0, 3.45),
@@ -552,6 +573,11 @@ heading_df <- data.frame(
 )
 trait_df <- data.frame(x = 0, y = y_trait, label = paste0("Trait: ", trait_id), stringsAsFactors = FALSE)
 spine_df <- data.frame(x = 0, y = min(program_plot$y_row) - row_spacing * 0.20, yend = y_trait - row_spacing * 0.32)
+row_band_df <- program_plot[program_plot$row_index %% 2 == 0, , drop = FALSE]
+row_band_df$xmin <- rep(plot_x_min + 0.16, nrow(row_band_df))
+row_band_df$xmax <- rep(plot_x_max - 0.16, nrow(row_band_df))
+row_band_df$ymin <- row_band_df$y_row - row_spacing * 0.36
+row_band_df$ymax <- row_band_df$y_row + row_spacing * 0.36
 gene_color_legend <- data.frame(
   x = c(-4.10, -2.75, -1.60),
   y = y_legend,
@@ -560,13 +586,24 @@ gene_color_legend <- data.frame(
   stringsAsFactors = FALSE
 )
 direction_legend <- data.frame(
-  x = 0.95,
+  x = -0.25,
   y = y_legend,
-  label = paste(
-    "Gene branches point toward the modeled program.",
-    "Program glyph: arrow = positive dominant direction; flat bar = negative.",
-    "Parentheses = discordant gene direction.",
-    sep = "\n"
+  label = "program mark: arrow positive, cap negative; (gene) discordant",
+  stringsAsFactors = FALSE
+)
+evidence_label <- data.frame(
+  x = 2.55,
+  y = y_legend,
+  label = "evidence:",
+  stringsAsFactors = FALSE
+)
+evidence_legend <- data.frame(
+  x = c(3.12, 3.66, 4.20, 4.74),
+  y = y_legend,
+  label = c("none", "B", "R", "B+R"),
+  color = factor(
+    c("other", "program_enriched", "regulator_enriched", "both_enriched"),
+    levels = c("other", "program_enriched", "regulator_enriched", "both_enriched")
   ),
   stringsAsFactors = FALSE
 )
@@ -579,13 +616,19 @@ subtitle_text <- sprintf(
   sum(gene_plot$side == "regulator")
 )
 caption_text <- sprintf(
-  "B = program burden score; R = regulator-burden correlation score. Program fill marks Bonferroni evidence class. Filters: |gamma| >= %.3g, top %d loading genes, regulator FDR <= %.3g.",
+  "B = program burden score; R = regulator-burden correlation score. Program fill uses Bonferroni evidence: gray = neither, B = program burden, R = regulator burden, B+R = both. Gene color shows signed gamma. Filters: |gamma| >= %.3g, top %d loading genes, regulator FDR <= %.3g.",
   hit_abs_gamma_threshold,
   loading_top_n,
   regulator_fdr_threshold
 )
 
 g <- ggplot()
+g <- g + geom_rect(
+  data = row_band_df,
+  aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
+  fill = "#F9FAFB",
+  color = NA
+)
 g <- g + geom_segment(
   data = spine_df,
   aes(x = x, y = y, xend = x, yend = yend),
@@ -599,12 +642,11 @@ g <- g + geom_segment(
     y = y_gene,
     xend = program_edge_x,
     yend = y_row,
-    color = gene_color,
     alpha = branch_alpha,
     linetype = side_label
   ),
-  linewidth = 0.32,
-  arrow = grid::arrow(length = grid::unit(0.035, "inches"), type = "open")
+  linewidth = 0.20,
+  color = "#CBD5E1"
 )
 g <- g + geom_segment(
   data = zero_effects,
@@ -629,16 +671,24 @@ g <- g + geom_label(
   data = program_plot,
   aes(x = program_x, y = y_row, label = program_node_label, fill = color),
   label.size = 0.18,
-  label.padding = grid::unit(0.15, "lines"),
+  label.padding = grid::unit(0.18, "lines"),
   lineheight = 0.90,
   size = program_text_size,
   fontface = "bold",
   color = "#111827"
 )
+g <- g + geom_text(
+  data = program_plot,
+  aes(x = program_x, y = y_row - row_spacing * 0.25, label = score_label),
+  size = max(2.25, program_text_size * 0.66),
+  color = "#4B5563",
+  fontface = "bold"
+)
 g <- g + geom_point(
   data = gene_plot,
-  aes(x = gene_point_x, y = y_gene, shape = side_label, size = abs_gamma_plot, color = gene_color),
-  stroke = 0.65
+  aes(x = gene_point_x, y = y_gene, shape = side_label, size = point_size, color = gene_color),
+  stroke = 0,
+  alpha = 0.78
 )
 g <- g + geom_text(
   data = gene_plot,
@@ -690,10 +740,28 @@ g <- g + geom_label(
   vjust = 0.5,
   fill = "white",
   color = "#374151",
-  label.size = 0.16,
-  label.padding = grid::unit(0.16, "lines"),
+  label.size = 0,
+  label.padding = grid::unit(0.12, "lines"),
   lineheight = 0.95,
-  size = 2.55
+  size = 2.45
+)
+g <- g + geom_text(
+  data = evidence_label,
+  aes(x = x, y = y, label = label),
+  hjust = 0,
+  vjust = 0.5,
+  size = 2.45,
+  fontface = "bold",
+  color = "#374151"
+)
+g <- g + geom_label(
+  data = evidence_legend,
+  aes(x = x, y = y, label = label, fill = color),
+  label.size = 0.12,
+  label.padding = grid::unit(0.12, "lines"),
+  size = 2.25,
+  fontface = "bold",
+  color = "#111827"
 )
 g <- g + scale_color_identity()
 g <- g + scale_alpha_identity()
@@ -716,10 +784,7 @@ g <- g + scale_linetype_manual(
   values = c("Program loading genes" = "solid", "Regulator genes" = "22"),
   name = "Gene source"
 )
-g <- g + scale_size_continuous(
-  range = c(2.1, 4.5),
-  name = "|gamma|"
-)
+g <- g + scale_size_identity()
 g <- g + coord_cartesian(xlim = c(plot_x_min, plot_x_max), ylim = c(plot_y_min, plot_y_max), clip = "off")
 g <- g + labs(
   title = "Programs selected for modeling trait associations",
@@ -730,7 +795,7 @@ g <- g + theme_void(base_family = "Helvetica")
 g <- g + theme(
   plot.background = element_rect(fill = "white", color = NA),
   panel.background = element_rect(fill = "white", color = NA),
-  legend.position = "right",
+  legend.position = "none",
   legend.box = "vertical",
   legend.title = element_text(size = 9, face = "bold", color = "#111827"),
   legend.text = element_text(size = 8, color = "#374151"),
