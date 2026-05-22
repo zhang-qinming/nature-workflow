@@ -3,7 +3,7 @@ args <- commandArgs(trailingOnly = TRUE)
 association_dir <- as.character(args[1])
 trait_file <- as.character(args[2])
 k <- as.numeric(args[3])
-label_programs_raw <- if (length(args) >= 4) as.character(args[4]) else ""
+unused_arg4 <- if (length(args) >= 4) as.character(args[4]) else ""
 table_path <- as.character(args[5])
 plot_prefix <- as.character(args[6])
 
@@ -15,8 +15,8 @@ script_dir <- if (length(script_path_arg) > 0) {
 }
 source(file.path(script_dir, "helpers.R"))
 
-label_programs <- parse_program_vector(label_programs_raw)
-df <- read_program_regulator_summary(association_dir, trait_file, k, label_programs)
+df <- read_program_regulator_summary(association_dir, trait_file, k, character())
+df$label <- NULL
 
 ensure_parent_dir(table_path)
 ensure_parent_dir(paste0(plot_prefix, ".pdf"))
@@ -29,14 +29,12 @@ write.table(
 )
 
 library(ggplot2)
-library(ggrepel)
 
-g <- ggplot(df, aes(x = program_score, y = regulator_score, label = label, color = color))
+g <- ggplot(df, aes(x = program_score, y = regulator_score, color = color))
 g <- g + theme_classic(base_size = 24, base_family = "Helvetica")
 g <- g + geom_point(size = 4)
 g <- g + geom_vline(xintercept = 0, linetype = "dashed")
 g <- g + geom_hline(yintercept = 0, linetype = "dashed")
-g <- g + geom_text_repel(size = 7, max.overlaps = 100)
 g <- g + scale_color_manual(
   values = c(
     "other" = "grey60",
@@ -45,7 +43,6 @@ g <- g + scale_color_manual(
     "both_enriched" = "#34A853"
   )
 )
-g <- g + guides(color = guide_legend(override.aes = aes(label = "", alpha = 1)))
 g <- g + theme(legend.title = element_blank())
 g <- g + xlab("Program burden effect, signed -log10(P)")
 g <- g + ylab("Regulator-burden correlation, signed -log10(P)")
