@@ -16,7 +16,6 @@ script_dir <- if (length(script_path_arg) > 0) {
 source(file.path(script_dir, "helpers.R"))
 
 df <- read_program_regulator_summary(association_dir, trait_file, k, character())
-df$label <- NULL
 
 ensure_parent_dir(table_path)
 ensure_parent_dir(paste0(plot_prefix, ".pdf"))

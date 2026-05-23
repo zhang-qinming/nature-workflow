@@ -508,12 +508,6 @@ read_program_regulator_summary <- function(association_dir, trait_file, k, label
   bonferroni_cutoff <- 0.05 / nrow(df)
   df$program_score <- sign(df$MEANgamma_top100 - df$shet_adjusted_random_mean) * (-log10(df$MEANgamma_top100_shet_adjusted_P))
   df$regulator_score <- sign(df$beta_withShet) * (-log10(df$P_withShet))
-  df$label <- df$Program
-  df$label[
-    df$MEANgamma_top100_shet_adjusted_P > bonferroni_cutoff &
-      df$P_withShet > bonferroni_cutoff &
-      !is.element(df$Program, label_programs)
-  ] <- ""
 
   df$color <- ifelse(
     df$MEANgamma_top100_shet_adjusted_P < bonferroni_cutoff & df$P_withShet < bonferroni_cutoff,
