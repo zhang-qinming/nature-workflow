@@ -206,21 +206,63 @@ posterior_df$abs_gamma <- abs(posterior_df$post_mean)
 trait_file <- resolve_association_trait_file(program_association_dir, association_trait_file, posterior_path, k)
 message(sprintf("Using ProgramLevel association trait file: %s", trait_file))
 message(sprintf("Using posterior file: %s", basename(posterior_path)))
-program_summary <- read_program_regulator_summary(program_association_dir, trait_file, k, character())
-program_summary <- annotate_program_summary(program_summary)
-program_summary <- program_summary[order(program_summary$priority_tier, -program_summary$priority_score, program_summary$Program), , drop = FALSE]
-program_summary <- program_summary[
-  program_summary$priority_tier < 3 | program_summary$priority_score >= min_abs_score,
+program_summary_all <- read_program_regulator_summary(program_association_dir, trait_file, k, character())
+program_summary_all <- annotate_program_summary(program_summary_all)
+
+select_top_programs <- function(df, score_col, sig_col, n) {
+  if (nrow(df) == 0 || n <= 0) {
+    return(character())
+  }
+  sig <- as.logical(df[[sig_col]])
+  sig[is.na(sig)] <- FALSE
+  score <- abs(as.numeric(df[[score_col]]))
+  score[!is.finite(score)] <- 0
+  keep <- isTRUE(any(sig)) & sig
+  keep <- keep | score >= min_abs_score
+  candidates <- df[keep, , drop = FALSE]
+  if (nrow(candidates) == 0) {
+    candidates <- df
+  }
+  candidate_sig <- as.logical(candidates[[sig_col]])
+  candidate_sig[is.na(candidate_sig)] <- FALSE
+  candidate_score <- abs(as.numeric(candidates[[score_col]]))
+  candidate_score[!is.finite(candidate_score)] <- 0
+  candidates <- candidates[order(!candidate_sig, -candidate_score, candidates$Program), , drop = FALSE]
+  head(as.character(candidates$Program), n)
+}
+
+max_programs <- max(1, as.integer(max_programs))
+max_programs_per_panel <- max(1, ceiling(max_programs / 2))
+program_selected <- select_top_programs(
+  program_summary_all,
+  "program_score",
+  "program_sig",
+  max_programs_per_panel
+)
+regulator_selected <- select_top_programs(
+  program_summary_all,
+  "regulator_score",
+  "regulator_sig",
+  max_programs_per_panel
+)
+selected_programs <- unique(c(program_selected, regulator_selected))
+
+if (length(selected_programs) == 0) {
+  program_summary_all <- program_summary_all[order(
+    program_summary_all$priority_tier,
+    -program_summary_all$priority_score,
+    program_summary_all$Program
+  ), , drop = FALSE]
+  selected_programs <- head(as.character(program_summary_all$Program), max_programs)
+}
+
+program_summary <- program_summary_all[
+  match(selected_programs, program_summary_all$Program, nomatch = 0),
   ,
   drop = FALSE
 ]
-if (nrow(program_summary) == 0) {
-  program_summary <- read_program_regulator_summary(program_association_dir, trait_file, k, character())
-  program_summary <- annotate_program_summary(program_summary)
-  program_summary <- program_summary[order(-program_summary$priority_score, program_summary$Program), , drop = FALSE]
-}
-program_summary <- head(program_summary, max_programs)
-selected_programs <- as.character(program_summary$Program)
+program_summary$selected_by_program <- program_summary$Program %in% program_selected
+program_summary$selected_by_regulator <- program_summary$Program %in% regulator_selected
 
 spectra_top <- read_spectra_top_genes(spectra_path, gene_map_path, k, loading_top_n)
 spectra_top <- spectra_top[spectra_top$Program %in% selected_programs, , drop = FALSE]
@@ -346,6 +388,12 @@ program_summary$program_label <- sprintf(
   program_summary$loading_gene_count,
   program_summary$regulator_gene_count
 )
+if (!"selected_by_program" %in% names(program_summary)) {
+  program_summary$selected_by_program <- program_summary$Program %in% program_selected
+}
+if (!"selected_by_regulator" %in% names(program_summary)) {
+  program_summary$selected_by_regulator <- program_summary$Program %in% regulator_selected
+}
 program_summary$trait_id <- trait_id
 program_summary$has_overlap <- has_overlap
 program_summary$empty_reason <- if (has_overlap) "" else empty_reason
@@ -415,6 +463,7 @@ if (has_overlap) {
   side_hits$has_overlap <- TRUE
   side_hits$empty_reason <- ""
   side_hits <- side_hits[, names(make_empty_side_hits()), drop = FALSE]
+  side_hits$membership_score <- as.numeric(side_hits$membership_score)
 } else {
   side_hits <- make_empty_side_hits()
 }
@@ -441,6 +490,684 @@ if (!has_overlap) {
 
 ensure_parent_dir(paste0(plot_prefix, ".pdf"))
 library(ggplot2)
+library(grid)
+
+draw_model_panel <- function(
+    program_summary,
+    side_hits,
+    trait_id,
+    plot_prefix,
+    max_genes_per_side,
+    hit_abs_gamma_threshold,
+    loading_top_n,
+    regulator_fdr_threshold
+) {
+  clean_label <- function(x) {
+    x <- as.character(x)
+    x[is.na(x)] <- ""
+    x <- gsub("[\r\n\t]+", " ", x)
+    x <- gsub("\\s+", " ", x)
+    trimws(x)
+  }
+
+  format_signed_score <- function(values) {
+    values <- as.numeric(values)
+    out <- ifelse(
+      is.na(values),
+      "NA",
+      ifelse(
+        is.finite(values),
+        sprintf("%+.1f", values),
+        sprintf("%sInf", ifelse(values > 0, "+", "-"))
+      )
+    )
+    out
+  }
+
+  signed_value_color <- function(values, max_abs) {
+    values <- as.numeric(values)
+    values[!is.finite(values)] <- 0
+    max_abs <- max(as.numeric(max_abs), 1e-12)
+
+    pos_palette <- grDevices::colorRampPalette(c("#F2B6A7", "#B2182B"))(101)
+    neg_palette <- grDevices::colorRampPalette(c("#B8D7EA", "#2166AC"))(101)
+    intensity <- pmin(1, abs(values) / max_abs)
+    idx <- pmax(1, pmin(101, floor(intensity * 100) + 1))
+
+    colors <- rep("#7A808A", length(values))
+    colors[values > 0] <- pos_palette[idx[values > 0]]
+    colors[values < 0] <- neg_palette[idx[values < 0]]
+    colors
+  }
+
+  split_gene_lines <- function(df, n = max_genes_per_side) {
+    if (nrow(df) == 0) {
+      return(data.frame(
+        gene_label = character(),
+        post_mean = numeric(),
+        is_discordant = logical(),
+        stringsAsFactors = FALSE
+      ))
+    }
+    df <- df[order(df$display_rank, -df$abs_gamma, df$gene), , drop = FALSE]
+    df <- head(df, n)
+    data.frame(
+      gene_label = clean_label(df$gene_label),
+      post_mean = as.numeric(df$post_mean),
+      is_discordant = as.logical(df$is_discordant),
+      stringsAsFactors = FALSE
+    )
+  }
+
+  draw_gene_list <- function(lines, x, y_top, line_gap, hjust, font_size, gamma_max) {
+    if (nrow(lines) == 0) {
+      grid.text(
+        "no overlap",
+        x = unit(x, "npc"),
+        y = unit(y_top, "npc"),
+        just = c(ifelse(hjust == 0, "left", "right"), "top"),
+        gp = gpar(col = "#9CA3AF", fontsize = font_size * 0.82, fontface = "italic")
+      )
+      return(invisible(NULL))
+    }
+
+    colors <- signed_value_color(lines$post_mean, gamma_max)
+    for (i in seq_len(nrow(lines))) {
+      label <- clean_label(lines$gene_label[i])
+      fontface <- if (isTRUE(lines$is_discordant[i])) "bold.italic" else "plain"
+      grid.text(
+        label,
+        x = unit(x, "npc"),
+        y = unit(y_top - (i - 1) * line_gap, "npc"),
+        just = c(ifelse(hjust == 0, "left", "right"), "top"),
+        gp = gpar(col = colors[i], fontsize = font_size, fontface = fontface)
+      )
+    }
+  }
+
+  draw_arrow <- function(x0, x1, y, direction, col = "#4B5563", lwd = 2.1) {
+    direction <- sign(as.numeric(direction))
+    if (!is.finite(direction)) {
+      direction <- 0
+    }
+    if (direction >= 0) {
+      grid.segments(
+        x0 = unit(x0, "npc"),
+        x1 = unit(x1, "npc"),
+        y0 = unit(y, "npc"),
+        y1 = unit(y, "npc"),
+        gp = gpar(col = col, lwd = lwd, lineend = "round"),
+        arrow = arrow(length = unit(0.09, "inches"), type = "closed")
+      )
+    } else {
+      grid.segments(
+        x0 = unit(x0, "npc"),
+        x1 = unit(x1, "npc"),
+        y0 = unit(y, "npc"),
+        y1 = unit(y, "npc"),
+        gp = gpar(col = col, lwd = lwd, lineend = "round")
+      )
+      grid.segments(
+        x0 = unit(x1, "npc"),
+        x1 = unit(x1, "npc"),
+        y0 = unit(y - 0.010, "npc"),
+        y1 = unit(y + 0.010, "npc"),
+        gp = gpar(col = col, lwd = lwd, lineend = "round")
+      )
+    }
+  }
+
+  draw_program_box <- function(x, y, label, score_label, fill, border = "#111827") {
+    grid.roundrect(
+      x = unit(x, "npc"),
+      y = unit(y, "npc"),
+      width = unit(0.060, "npc"),
+      height = unit(0.032, "npc"),
+      r = unit(0.006, "npc"),
+      gp = gpar(fill = fill, col = border, lwd = 0.8)
+    )
+    grid.text(
+      label,
+      x = unit(x, "npc"),
+      y = unit(y + 0.002, "npc"),
+      gp = gpar(col = "#111827", fontsize = 9.2, fontface = "bold")
+    )
+    grid.text(
+      score_label,
+      x = unit(x, "npc"),
+      y = unit(y - 0.031, "npc"),
+      gp = gpar(col = "#4B5563", fontsize = 6.8, fontface = "bold")
+    )
+  }
+
+  draw_gene_module <- function(x, y, width, height, title, lines, gamma_max, align = "left", fill = "#F8FAFC") {
+    grid.roundrect(
+      x = unit(x, "npc"),
+      y = unit(y, "npc"),
+      width = unit(width, "npc"),
+      height = unit(height, "npc"),
+      r = unit(0.008, "npc"),
+      gp = gpar(fill = fill, col = "#E5E7EB", lwd = 0.6)
+    )
+    grid.text(
+      title,
+      x = unit(x - width / 2 + 0.014, "npc"),
+      y = unit(y + height / 2 - 0.020, "npc"),
+      just = c("left", "top"),
+      gp = gpar(col = "#111827", fontsize = 7.4, fontface = "bold")
+    )
+    text_x <- if (identical(align, "right")) x + width / 2 - 0.014 else x - width / 2 + 0.014
+    hjust <- if (identical(align, "right")) 1 else 0
+    line_gap <- min(0.019, (height - 0.052) / max(1, max(nrow(lines), 1)))
+    font_size <- max(5.1, min(7.2, 7.4 - max(0, nrow(lines) - 8) * 0.12))
+    draw_gene_list(
+      lines = lines,
+      x = text_x,
+      y_top = y + height / 2 - 0.047,
+      line_gap = line_gap,
+      hjust = hjust,
+      font_size = font_size,
+      gamma_max = gamma_max
+    )
+  }
+
+  evidence_fill <- c(
+    "other" = "#F3F4F6",
+    "program_enriched" = "#F9D48B",
+    "regulator_enriched" = "#A9C7E6",
+    "both_enriched" = "#A9D6A4"
+  )
+
+  program_summary$Program <- as.character(program_summary$Program)
+  side_hits$Program <- as.character(side_hits$Program)
+  panel_programs <- program_summary[program_summary$selected_by_program, , drop = FALSE]
+  panel_regulators <- program_summary[program_summary$selected_by_regulator, , drop = FALSE]
+  if (nrow(panel_programs) == 0) {
+    panel_programs <- program_summary[order(-abs(program_summary$program_score), program_summary$Program), , drop = FALSE]
+    panel_programs <- head(panel_programs, max(1, ceiling(nrow(program_summary) / 2)))
+  }
+  if (nrow(panel_regulators) == 0) {
+    panel_regulators <- program_summary[order(-abs(program_summary$regulator_score), program_summary$Program), , drop = FALSE]
+    panel_regulators <- head(panel_regulators, max(1, ceiling(nrow(program_summary) / 2)))
+  }
+
+  panel_programs <- panel_programs[order(-abs(panel_programs$program_score), panel_programs$Program), , drop = FALSE]
+  panel_regulators <- panel_regulators[order(-abs(panel_regulators$regulator_score), panel_regulators$Program), , drop = FALSE]
+  gamma_max <- max(abs(as.numeric(side_hits$post_mean)), hit_abs_gamma_threshold, na.rm = TRUE)
+  if (!is.finite(gamma_max)) {
+    gamma_max <- max(hit_abs_gamma_threshold, 1)
+  }
+
+  n_left <- nrow(panel_programs)
+  n_right <- nrow(panel_regulators)
+  n_rows <- max(n_left, n_right, 1)
+  canvas_width <- 15.8
+  canvas_height <- max(7.0, min(14.0, 2.6 + n_rows * 1.35))
+  ensure_parent_dir(paste0(plot_prefix, ".pdf"))
+
+  draw_page <- function() {
+    grid.newpage()
+    grid.rect(gp = gpar(fill = "white", col = NA))
+
+    grid.text(
+      "Programs selected for modeling trait associations",
+      x = unit(0.5, "npc"),
+      y = unit(0.965, "npc"),
+      gp = gpar(col = "#111827", fontsize = 18, fontface = "bold")
+    )
+    grid.text(
+      sprintf(
+        "Trait: %s   |   %d program-burden modules, %d regulator-burden modules. Gene color encodes signed gamma; parentheses mark discordant direction.",
+        trait_id,
+        n_left,
+        n_right
+      ),
+      x = unit(0.5, "npc"),
+      y = unit(0.936, "npc"),
+      gp = gpar(col = "#4B5563", fontsize = 8.8)
+    )
+
+    grid.roundrect(
+      x = unit(0.5, "npc"),
+      y = unit(0.864, "npc"),
+      width = unit(0.135, "npc"),
+      height = unit(0.038, "npc"),
+      r = unit(0.008, "npc"),
+      gp = gpar(fill = "#111827", col = NA)
+    )
+    grid.text(
+      trait_id,
+      x = unit(0.5, "npc"),
+      y = unit(0.866, "npc"),
+      gp = gpar(col = "white", fontsize = 10.5, fontface = "bold")
+    )
+
+    grid.text(
+      sprintf("Program burden selected\nprogram genes (top %d overlap)", loading_top_n),
+      x = unit(0.247, "npc"),
+      y = unit(0.806, "npc"),
+      gp = gpar(col = "#111827", fontsize = 9.2, fontface = "bold", lineheight = 0.95)
+    )
+    grid.text(
+      sprintf("Regulator-burden selected\nregulators (FDR <= %.3g)", regulator_fdr_threshold),
+      x = unit(0.753, "npc"),
+      y = unit(0.806, "npc"),
+      gp = gpar(col = "#111827", fontsize = 9.2, fontface = "bold", lineheight = 0.95)
+    )
+
+    row_top <- 0.745
+    row_bottom <- 0.155
+    row_step <- if (n_rows <= 1) 0 else (row_top - row_bottom) / (n_rows - 1)
+    module_h <- min(0.118, max(0.080, row_step * 0.73))
+
+    if (n_left > 0) {
+      for (i in seq_len(n_left)) {
+        row <- panel_programs[i, , drop = FALSE]
+        y <- if (n_rows <= 1) (row_top + row_bottom) / 2 else row_top - (i - 1) * row_step
+        if (i %% 2 == 0) {
+          grid.rect(
+            x = unit(0.250, "npc"),
+            y = unit(y, "npc"),
+            width = unit(0.440, "npc"),
+            height = unit(module_h * 1.16, "npc"),
+            gp = gpar(fill = "#F9FAFB", col = NA)
+          )
+        }
+        hits <- side_hits[side_hits$Program == row$Program & side_hits$side == "program_loading", , drop = FALSE]
+        lines <- split_gene_lines(hits)
+        draw_gene_module(
+          x = 0.244,
+          y = y,
+          width = 0.270,
+          height = module_h,
+          title = sprintf("%s genes", row$Program),
+          lines = lines,
+          gamma_max = gamma_max,
+          align = "right",
+          fill = "#FFFFFF"
+        )
+        draw_arrow(
+          x0 = 0.382,
+          x1 = 0.462,
+          y = y,
+          direction = row$program_score,
+          col = "#4B5563",
+          lwd = 1.7 + 1.0 * min(1, abs(as.numeric(row$program_score)) / 4)
+        )
+        draw_program_box(
+          x = 0.415,
+          y = y + 0.030,
+          label = row$Program,
+          score_label = sprintf("B %s", format_signed_score(row$program_score)),
+          fill = evidence_fill[as.character(row$color)]
+        )
+      }
+    }
+
+    if (n_right > 0) {
+      for (i in seq_len(n_right)) {
+        row <- panel_regulators[i, , drop = FALSE]
+        y <- if (n_rows <= 1) (row_top + row_bottom) / 2 else row_top - (i - 1) * row_step
+        if (i %% 2 == 0) {
+          grid.rect(
+            x = unit(0.750, "npc"),
+            y = unit(y, "npc"),
+            width = unit(0.440, "npc"),
+            height = unit(module_h * 1.16, "npc"),
+            gp = gpar(fill = "#F9FAFB", col = NA)
+          )
+        }
+        hits <- side_hits[side_hits$Program == row$Program & side_hits$side == "regulator", , drop = FALSE]
+        pos_hits <- hits[as.numeric(hits$membership_score) >= 0, , drop = FALSE]
+        neg_hits <- hits[as.numeric(hits$membership_score) < 0, , drop = FALSE]
+        pos_lines <- split_gene_lines(pos_hits, max(1, floor(max_genes_per_side / 2)))
+        neg_lines <- split_gene_lines(neg_hits, max(1, ceiling(max_genes_per_side / 2)))
+        if (nrow(pos_lines) == 0 && nrow(neg_lines) == 0) {
+          all_lines <- split_gene_lines(hits)
+          pos_lines <- all_lines
+        }
+
+        draw_program_box(
+          x = 0.585,
+          y = y + 0.030,
+          label = row$Program,
+          score_label = sprintf("R %s", format_signed_score(row$regulator_score)),
+          fill = evidence_fill[as.character(row$color)]
+        )
+        draw_arrow(
+          x0 = 0.538,
+          x1 = 0.620,
+          y = y,
+          direction = row$regulator_score,
+          col = "#4B5563",
+          lwd = 1.7 + 1.0 * min(1, abs(as.numeric(row$regulator_score)) / 4)
+        )
+        draw_arrow(
+          x0 = 0.620,
+          x1 = 0.502,
+          y = y,
+          direction = row$regulator_score,
+          col = "#9CA3AF",
+          lwd = 0.9
+        )
+
+        draw_gene_module(
+          x = 0.724,
+          y = y + module_h * 0.24,
+          width = 0.245,
+          height = module_h * 0.48,
+          title = "positive regulators",
+          lines = pos_lines,
+          gamma_max = gamma_max,
+          align = "left",
+          fill = "#FFF7ED"
+        )
+        draw_gene_module(
+          x = 0.724,
+          y = y - module_h * 0.30,
+          width = 0.245,
+          height = module_h * 0.48,
+          title = "negative regulators",
+          lines = neg_lines,
+          gamma_max = gamma_max,
+          align = "left",
+          fill = "#EFF6FF"
+        )
+      }
+    }
+
+    legend_y <- 0.080
+    grid.points(
+      x = unit(c(0.160, 0.260, 0.360), "npc"),
+      y = unit(rep(legend_y, 3), "npc"),
+      pch = 16,
+      size = unit(0.018, "npc"),
+      gp = gpar(col = c("#2166AC", "#7A808A", "#B2182B"))
+    )
+    grid.text("negative gamma", x = unit(0.180, "npc"), y = unit(legend_y, "npc"), just = "left", gp = gpar(col = "#2166AC", fontsize = 7.4, fontface = "bold"))
+    grid.text("near 0", x = unit(0.280, "npc"), y = unit(legend_y, "npc"), just = "left", gp = gpar(col = "#7A808A", fontsize = 7.4, fontface = "bold"))
+    grid.text("positive gamma", x = unit(0.380, "npc"), y = unit(legend_y, "npc"), just = "left", gp = gpar(col = "#B2182B", fontsize = 7.4, fontface = "bold"))
+    grid.text(
+      "Arrow head = positive program/regulator direction; flat cap = negative direction.",
+      x = unit(0.575, "npc"),
+      y = unit(legend_y, "npc"),
+      just = "left",
+      gp = gpar(col = "#374151", fontsize = 7.4)
+    )
+
+    grid.text(
+      sprintf(
+        "Filters: |gamma| >= %.3g; program genes from top %d loading genes; regulators at FDR <= %.3g. B = program burden score; R = regulator-burden correlation score.",
+        hit_abs_gamma_threshold,
+        loading_top_n,
+        regulator_fdr_threshold
+      ),
+      x = unit(0.020, "npc"),
+      y = unit(0.032, "npc"),
+      just = "left",
+      gp = gpar(col = "#4B5563", fontsize = 7.2)
+    )
+  }
+
+  draw_centered_page <- function() {
+    grid.newpage()
+    grid.rect(gp = gpar(fill = "white", col = NA))
+
+    trait_x <- 0.500
+    trait_y <- 0.500
+    trait_w <- 0.150
+    trait_h <- 0.062
+    trait_left <- trait_x - trait_w / 2
+    trait_right <- trait_x + trait_w / 2
+
+    draw_trait_arrow <- function(x0, y0, x1, y1, direction, col = "#4B5563", lwd = 2.0) {
+      direction <- sign(as.numeric(direction))
+      if (!is.finite(direction)) {
+        direction <- 0
+      }
+      if (direction >= 0) {
+        grid.segments(
+          x0 = unit(x0, "npc"),
+          x1 = unit(x1, "npc"),
+          y0 = unit(y0, "npc"),
+          y1 = unit(y1, "npc"),
+          gp = gpar(col = col, lwd = lwd, lineend = "round"),
+          arrow = arrow(length = unit(0.085, "inches"), type = "closed")
+        )
+      } else {
+        grid.segments(
+          x0 = unit(x0, "npc"),
+          x1 = unit(x1, "npc"),
+          y0 = unit(y0, "npc"),
+          y1 = unit(y1, "npc"),
+          gp = gpar(col = col, lwd = lwd, lineend = "round")
+        )
+        grid.segments(
+          x0 = unit(x1, "npc"),
+          x1 = unit(x1, "npc"),
+          y0 = unit(y1 - 0.012, "npc"),
+          y1 = unit(y1 + 0.012, "npc"),
+          gp = gpar(col = col, lwd = lwd, lineend = "round")
+        )
+      }
+    }
+
+    grid.text(
+      "Programs selected for modeling trait associations",
+      x = unit(0.5, "npc"),
+      y = unit(0.965, "npc"),
+      gp = gpar(col = "#111827", fontsize = 18, fontface = "bold")
+    )
+    grid.text(
+      sprintf(
+        "%d program-burden modules on the left; %d regulator-burden modules on the right. Gene color encodes signed gamma; parentheses mark discordant direction.",
+        n_left,
+        n_right
+      ),
+      x = unit(0.5, "npc"),
+      y = unit(0.936, "npc"),
+      gp = gpar(col = "#4B5563", fontsize = 8.8)
+    )
+
+    grid.text(
+      sprintf("Program burden selected\nprogram loading genes (top %d overlap)", loading_top_n),
+      x = unit(0.205, "npc"),
+      y = unit(0.866, "npc"),
+      gp = gpar(col = "#111827", fontsize = 9.2, fontface = "bold", lineheight = 0.95)
+    )
+    grid.text(
+      sprintf("Regulator-burden selected\nregulator genes (FDR <= %.3g)", regulator_fdr_threshold),
+      x = unit(0.795, "npc"),
+      y = unit(0.866, "npc"),
+      gp = gpar(col = "#111827", fontsize = 9.2, fontface = "bold", lineheight = 0.95)
+    )
+
+    grid.roundrect(
+      x = unit(trait_x, "npc"),
+      y = unit(trait_y, "npc"),
+      width = unit(trait_w, "npc"),
+      height = unit(trait_h, "npc"),
+      r = unit(0.010, "npc"),
+      gp = gpar(fill = "#111827", col = NA)
+    )
+    grid.text(
+      paste0("Trait\n", trait_id),
+      x = unit(trait_x, "npc"),
+      y = unit(trait_y + 0.002, "npc"),
+      gp = gpar(col = "white", fontsize = 10.0, fontface = "bold", lineheight = 0.92)
+    )
+
+    row_top <- 0.775
+    row_bottom <- 0.215
+    row_step <- if (n_rows <= 1) 0 else (row_top - row_bottom) / (n_rows - 1)
+    module_h <- if (n_rows <= 1) 0.135 else min(0.135, max(0.060, row_step * 0.74))
+
+    left_module_x <- 0.195
+    left_module_w <- 0.245
+    left_program_x <- 0.350
+    right_program_x <- 0.650
+    right_module_x <- 0.805
+    right_module_w <- 0.245
+
+    if (n_left > 0) {
+      for (i in seq_len(n_left)) {
+        row <- panel_programs[i, , drop = FALSE]
+        y <- if (n_rows <= 1) trait_y else row_top - (i - 1) * row_step
+        if (i %% 2 == 0) {
+          grid.roundrect(
+            x = unit(0.250, "npc"),
+            y = unit(y, "npc"),
+            width = unit(0.375, "npc"),
+            height = unit(module_h * 1.12, "npc"),
+            r = unit(0.006, "npc"),
+            gp = gpar(fill = "#F9FAFB", col = NA)
+          )
+        }
+        hits <- side_hits[side_hits$Program == row$Program & side_hits$side == "program_loading", , drop = FALSE]
+        lines <- split_gene_lines(hits)
+        draw_gene_module(
+          x = left_module_x,
+          y = y,
+          width = left_module_w,
+          height = module_h,
+          title = sprintf("%s program genes", row$Program),
+          lines = lines,
+          gamma_max = gamma_max,
+          align = "right",
+          fill = "#FFFFFF"
+        )
+        grid.segments(
+          x0 = unit(left_module_x + left_module_w / 2 + 0.006, "npc"),
+          x1 = unit(left_program_x - 0.038, "npc"),
+          y0 = unit(y, "npc"),
+          y1 = unit(y, "npc"),
+          gp = gpar(col = "#D1D5DB", lwd = 0.8)
+        )
+        draw_program_box(
+          x = left_program_x,
+          y = y,
+          label = row$Program,
+          score_label = sprintf("B %s", format_signed_score(row$program_score)),
+          fill = evidence_fill[as.character(row$color)]
+        )
+        draw_trait_arrow(
+          x0 = left_program_x + 0.038,
+          y0 = y,
+          x1 = trait_left - 0.004,
+          y1 = trait_y,
+          direction = row$program_score,
+          col = "#4B5563",
+          lwd = 1.6 + 1.1 * min(1, abs(as.numeric(row$program_score)) / 4)
+        )
+      }
+    }
+
+    if (n_right > 0) {
+      for (i in seq_len(n_right)) {
+        row <- panel_regulators[i, , drop = FALSE]
+        y <- if (n_rows <= 1) trait_y else row_top - (i - 1) * row_step
+        if (i %% 2 == 0) {
+          grid.roundrect(
+            x = unit(0.750, "npc"),
+            y = unit(y, "npc"),
+            width = unit(0.375, "npc"),
+            height = unit(module_h * 1.12, "npc"),
+            r = unit(0.006, "npc"),
+            gp = gpar(fill = "#F9FAFB", col = NA)
+          )
+        }
+        hits <- side_hits[side_hits$Program == row$Program & side_hits$side == "regulator", , drop = FALSE]
+        lines <- split_gene_lines(hits)
+        draw_program_box(
+          x = right_program_x,
+          y = y,
+          label = row$Program,
+          score_label = sprintf("R %s", format_signed_score(row$regulator_score)),
+          fill = evidence_fill[as.character(row$color)]
+        )
+        draw_trait_arrow(
+          x0 = right_program_x - 0.038,
+          y0 = y,
+          x1 = trait_right + 0.004,
+          y1 = trait_y,
+          direction = row$regulator_score,
+          col = "#4B5563",
+          lwd = 1.6 + 1.1 * min(1, abs(as.numeric(row$regulator_score)) / 4)
+        )
+        grid.segments(
+          x0 = unit(right_program_x + 0.038, "npc"),
+          x1 = unit(right_module_x - right_module_w / 2 - 0.006, "npc"),
+          y0 = unit(y, "npc"),
+          y1 = unit(y, "npc"),
+          gp = gpar(col = "#D1D5DB", lwd = 0.8)
+        )
+        draw_gene_module(
+          x = right_module_x,
+          y = y,
+          width = right_module_w,
+          height = module_h,
+          title = sprintf("%s regulators", row$Program),
+          lines = lines,
+          gamma_max = gamma_max,
+          align = "left",
+          fill = "#FFFFFF"
+        )
+      }
+    }
+
+    legend_y <- 0.095
+    grid.points(
+      x = unit(c(0.150, 0.255, 0.355), "npc"),
+      y = unit(rep(legend_y, 3), "npc"),
+      pch = 16,
+      size = unit(0.018, "npc"),
+      gp = gpar(col = c("#2166AC", "#7A808A", "#B2182B"))
+    )
+    grid.text("negative gamma", x = unit(0.170, "npc"), y = unit(legend_y, "npc"), just = "left", gp = gpar(col = "#2166AC", fontsize = 7.4, fontface = "bold"))
+    grid.text("near 0", x = unit(0.275, "npc"), y = unit(legend_y, "npc"), just = "left", gp = gpar(col = "#7A808A", fontsize = 7.4, fontface = "bold"))
+    grid.text("positive gamma", x = unit(0.375, "npc"), y = unit(legend_y, "npc"), just = "left", gp = gpar(col = "#B2182B", fontsize = 7.4, fontface = "bold"))
+    grid.text(
+      "Each program/regulator module is connected to the center trait; arrow head = positive direction, flat cap = negative direction.",
+      x = unit(0.555, "npc"),
+      y = unit(legend_y, "npc"),
+      just = "left",
+      gp = gpar(col = "#374151", fontsize = 7.3)
+    )
+    grid.text(
+      sprintf(
+        "Filters: |gamma| >= %.3g; program genes from top %d loading genes; regulators at FDR <= %.3g. B = program burden score; R = regulator-burden correlation score.",
+        hit_abs_gamma_threshold,
+        loading_top_n,
+        regulator_fdr_threshold
+      ),
+      x = unit(0.020, "npc"),
+      y = unit(0.040, "npc"),
+      just = "left",
+      gp = gpar(col = "#4B5563", fontsize = 7.2)
+    )
+  }
+
+  grDevices::pdf(paste0(plot_prefix, ".pdf"), width = canvas_width, height = canvas_height, useDingbats = FALSE)
+  draw_centered_page()
+  grDevices::dev.off()
+
+  grDevices::png(paste0(plot_prefix, ".png"), width = canvas_width, height = canvas_height, units = "in", res = 300)
+  draw_centered_page()
+  grDevices::dev.off()
+}
+
+draw_model_panel(
+  program_summary = program_summary,
+  side_hits = side_hits,
+  trait_id = trait_id,
+  plot_prefix = plot_prefix,
+  max_genes_per_side = max_genes_per_side,
+  hit_abs_gamma_threshold = hit_abs_gamma_threshold,
+  loading_top_n = loading_top_n,
+  regulator_fdr_threshold = regulator_fdr_threshold
+)
+
+quit(save = "no")
 
 signed_value_color <- function(values, max_abs) {
   values <- as.numeric(values)
