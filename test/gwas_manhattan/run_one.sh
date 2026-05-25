@@ -62,6 +62,7 @@ TEMP_CONFIG="$(mktemp "/tmp/${TASK_NAME}_${GWAS_ID}_${SLURM_JOB_ID:-$$}.XXXXXX.y
 
 python3 - "${GWAS_ID}" "${PROJECT_ROOT}" "${BASE_CONFIG}" "${TEMP_CONFIG}" "${OUTPUT_ROOT}" "${OUTPUT_DIR}" "${FILE_ID_MAP}" <<'PYEOF'
 import sys
+import os
 from pathlib import Path
 
 import yaml
@@ -88,6 +89,43 @@ for key in ("file_id_map", "gene_map", "gene_annotation", "geneset_dir", "spectr
 
 shared["file_id_map"] = str(file_id_map.resolve())
 config["workflows"]["figures"]["shared_inputs"] = shared
+
+shared_parameters = config.get("workflows", {}).get("figures", {}).get("shared_parameters", {})
+if not isinstance(shared_parameters, dict):
+    shared_parameters = {}
+
+def env_or_default(name, default, caster):
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    return caster(raw)
+
+sampling_trigger_rows = env_or_default(
+    "GWAS_SAMPLING_TRIGGER_ROWS",
+    int(shared_parameters.get("sampling_trigger_rows", 100000)),
+    int,
+)
+sampling_base_points = env_or_default(
+    "GWAS_SAMPLING_BASE_POINTS",
+    int(shared_parameters.get("sampling_base_points", 50000)),
+    int,
+)
+sampling_fraction = env_or_default(
+    "GWAS_SAMPLING_FRACTION",
+    float(shared_parameters.get("sampling_fraction", 0.01)),
+    float,
+)
+sampling_max_points = env_or_default(
+    "GWAS_SAMPLING_MAX_POINTS",
+    int(shared_parameters.get("sampling_max_points", 300000)),
+    int,
+)
+sampling_seed = env_or_default(
+    "GWAS_SAMPLING_SEED",
+    int(shared_parameters.get("sampling_seed", 1)),
+    int,
+)
+
 config["workflows"]["figures"]["gwas_manhattan"] = {
     "outputs": {"output_dir": str(output_dir)},
     "parameters": {
@@ -103,6 +141,13 @@ config["workflows"]["figures"]["gwas_manhattan"] = {
         ],
     },
 }
+
+parameters = config["workflows"]["figures"]["gwas_manhattan"]["parameters"]
+parameters["sampling_trigger_rows"] = sampling_trigger_rows
+parameters["sampling_base_points"] = sampling_base_points
+parameters["sampling_fraction"] = sampling_fraction
+parameters["sampling_max_points"] = sampling_max_points
+parameters["sampling_seed"] = sampling_seed
 
 with open(temp_path, "w", encoding="utf-8") as handle:
     yaml.dump(config, handle, default_flow_style=False, sort_keys=False, allow_unicode=True)

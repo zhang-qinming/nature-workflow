@@ -14,6 +14,11 @@ spectra_path <- if (length(args) >= 11 && nzchar(args[11])) as.character(args[11
 gene_map_path <- if (length(args) >= 12 && nzchar(args[12])) as.character(args[12]) else ""
 program_k <- if (length(args) >= 13) as.numeric(args[13]) else 60
 top_n_program_genes <- if (length(args) >= 14) as.numeric(args[14]) else 100
+sampling_trigger_rows <- if (length(args) >= 15) as.numeric(args[15]) else 100000
+sampling_base_points <- if (length(args) >= 16) as.numeric(args[16]) else 50000
+sampling_fraction <- if (length(args) >= 17) as.numeric(args[17]) else 0.01
+sampling_max_points <- if (length(args) >= 18) as.numeric(args[18]) else 300000
+sampling_seed <- if (length(args) >= 19) as.numeric(args[19]) else 1
 
 script_path_arg <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
 script_dir <- if (length(script_path_arg) > 0) {
@@ -46,6 +51,79 @@ dedupe_delimited_values <- function(values, sep = ";") {
       paste(unique(parts), collapse = sep)
     },
     character(1)
+  )
+}
+
+sample_gwas_points <- function(
+  gwas_df,
+  trigger_rows,
+  base_points,
+  fraction,
+  max_points,
+  genomewide_threshold,
+  label_p_threshold,
+  seed
+) {
+  total_rows <- nrow(gwas_df)
+  target_rows <- total_rows
+  sampling_applied <- FALSE
+
+  if (total_rows <= trigger_rows) {
+    return(list(
+      data = gwas_df,
+      total_rows = total_rows,
+      target_rows = total_rows,
+      sampled_rows = total_rows,
+      sampling_applied = sampling_applied
+    ))
+  }
+
+  target_rows <- base_points + ceiling(total_rows * fraction)
+  target_rows <- min(target_rows, max_points)
+  target_rows <- min(target_rows, total_rows)
+  if (target_rows >= total_rows) {
+    return(list(
+      data = gwas_df,
+      total_rows = total_rows,
+      target_rows = total_rows,
+      sampled_rows = total_rows,
+      sampling_applied = sampling_applied
+    ))
+  }
+
+  keep_mask <- gwas_df$P <= genomewide_threshold | gwas_df$P <= label_p_threshold
+  keep_indices <- which(keep_mask)
+  if (length(keep_indices) >= target_rows) {
+    message(sprintf(
+      "Sampling target %d rows is smaller than mandatory kept rows %d; truncating kept rows by significance.",
+      target_rows,
+      length(keep_indices)
+    ))
+    keep_df <- gwas_df[keep_indices, , drop = FALSE]
+    keep_df <- keep_df[order(keep_df$P, keep_df$geneset_color == "background", keep_df$POS), , drop = FALSE]
+    sampled_df <- head(keep_df, target_rows)
+    sampled_df <- sampled_df[order(as.numeric(sampled_df$CHROM), sampled_df$POS), , drop = FALSE]
+    return(list(
+      data = sampled_df,
+      total_rows = total_rows,
+      target_rows = target_rows,
+      sampled_rows = nrow(sampled_df),
+      sampling_applied = TRUE
+    ))
+  }
+
+  background_indices <- setdiff(seq_len(total_rows), keep_indices)
+  set.seed(as.integer(seed))
+  sampled_background <- sample(background_indices, target_rows - length(keep_indices), replace = FALSE)
+  sampled_indices <- sort(c(keep_indices, sampled_background))
+  sampled_df <- gwas_df[sampled_indices, , drop = FALSE]
+  sampled_df <- sampled_df[order(as.numeric(sampled_df$CHROM), sampled_df$POS), , drop = FALSE]
+  list(
+    data = sampled_df,
+    total_rows = total_rows,
+    target_rows = target_rows,
+    sampled_rows = nrow(sampled_df),
+    sampling_applied = TRUE
   )
 }
 
@@ -186,8 +264,28 @@ gwas_df$geneset <- dedupe_delimited_values(gwas_df$geneset)
 gwas_df$geneset[gwas_df$geneset == ""] <- "background"
 gwas_df$neg_log10_p <- -log10(pmax(gwas_df$P, .Machine$double.xmin))
 
-label_candidates <- gwas_df[
-  gwas_df$P <= label_p_threshold & gwas_df$geneset_color != "background",
+sampling_result <- sample_gwas_points(
+  gwas_df = gwas_df,
+  trigger_rows = as.integer(sampling_trigger_rows),
+  base_points = as.integer(sampling_base_points),
+  fraction = as.numeric(sampling_fraction),
+  max_points = as.integer(sampling_max_points),
+  genomewide_threshold = as.numeric(genomewide_threshold),
+  label_p_threshold = as.numeric(label_p_threshold),
+  seed = as.integer(sampling_seed)
+)
+gwas_plot_df <- sampling_result$data
+if (sampling_result$sampling_applied) {
+  message(sprintf(
+    "GWAS Manhattan sampling applied: total_rows=%d, target_rows=%d, sampled_rows=%d",
+    sampling_result$total_rows,
+    sampling_result$target_rows,
+    sampling_result$sampled_rows
+  ))
+}
+
+label_candidates <- gwas_plot_df[
+  gwas_plot_df$P <= label_p_threshold & gwas_plot_df$geneset_color != "background",
   c("CHROM", "POS", "SNP", "P", "COORD", "geneset_color", "neg_log10_p"),
   drop = FALSE
 ]
@@ -211,13 +309,17 @@ if (nrow(label_candidates) > 0) {
 }
 
 variants_export <- data.frame(
-  chr = gwas_df$CHROM,
-  bp = gwas_df$POS,
-  snp = gwas_df$SNP,
-  p = gwas_df$P,
-  logp = gwas_df$neg_log10_p,
+  chr = gwas_plot_df$CHROM,
+  bp = gwas_plot_df$POS,
+  snp = gwas_plot_df$SNP,
+  p = gwas_plot_df$P,
+  logp = gwas_plot_df$neg_log10_p,
   stringsAsFactors = FALSE
 )
+variants_export$total_input_rows <- sampling_result$total_rows
+variants_export$target_sample_rows <- sampling_result$target_rows
+variants_export$sampled_output_rows <- sampling_result$sampled_rows
+variants_export$sampling_applied <- sampling_result$sampling_applied
 
 hit_mask <- gwas_df$P <= genomewide_threshold
 if (any(hit_mask)) {
@@ -285,9 +387,9 @@ if (length(unique_sets) > 0) {
   }
 }
 
-g <- ggplot(gwas_df, aes(x = COORD, y = neg_log10_p, color = geneset_color))
+g <- ggplot(gwas_plot_df, aes(x = COORD, y = neg_log10_p, color = geneset_color))
 g <- g + theme_classic(base_size = 20, base_family = "Helvetica")
-if (nrow(gwas_df) > 8000000) {
+if (nrow(gwas_plot_df) > 8000000) {
   g <- g + geom_point(alpha = 0.1, size = 0.3, shape = ".")
 } else {
   g <- g + ggrastr::geom_point_rast(alpha = 0.3, size = 0.8, raster.dpi = 200)

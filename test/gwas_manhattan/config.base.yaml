@@ -25,3 +25,8 @@ workflows:
         - Hematopoiesisgenes
         - mitotic_cell_cycle
         - positive_macromolecule_synthesis
+      sampling_trigger_rows: 100000
+      sampling_base_points: 50000
+      sampling_fraction: 0.01
+      sampling_max_points: 300000
+      sampling_seed: 1

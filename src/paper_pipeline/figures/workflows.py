@@ -101,6 +101,11 @@ class ResolvedFiguresGwasManhattan:
     flank_bp: int
     label_p_threshold: float
     genomewide_threshold: float
+    sampling_trigger_rows: int
+    sampling_base_points: int
+    sampling_fraction: float
+    sampling_max_points: int
+    sampling_seed: int
     k: int
     top_n_program_genes: int
 
@@ -233,7 +238,6 @@ class ResolvedFiguresTraitProgramGenePanel:
     hit_abs_gamma_threshold: float
     loading_top_n: int
     regulator_fdr_threshold: float
-    min_abs_score: float
     render_plot: bool
 
 
@@ -820,6 +824,11 @@ def _resolve_figures_gwas_manhattan(config: LoadedConfig) -> ResolvedFiguresGwas
         flank_bp=int(parameters.get("flank_bp", 50000)),
         label_p_threshold=float(parameters.get("label_p_threshold", 1e-30)),
         genomewide_threshold=float(parameters.get("genomewide_threshold", 5e-8)),
+        sampling_trigger_rows=int(parameters.get("sampling_trigger_rows", 100000)),
+        sampling_base_points=int(parameters.get("sampling_base_points", 50000)),
+        sampling_fraction=float(parameters.get("sampling_fraction", 0.01)),
+        sampling_max_points=int(parameters.get("sampling_max_points", 300000)),
+        sampling_seed=int(parameters.get("sampling_seed", 1)),
         k=k,
         top_n_program_genes=int(parameters.get("top_n_program_genes", 100)),
     )
@@ -1316,7 +1325,6 @@ def _resolve_figures_trait_program_gene_panel(config: LoadedConfig) -> ResolvedF
         hit_abs_gamma_threshold=float(parameters.get("hit_abs_gamma_threshold", 0.1)),
         loading_top_n=int(parameters.get("loading_top_n", 200)),
         regulator_fdr_threshold=float(parameters.get("regulator_fdr_threshold", 0.05)),
-        min_abs_score=float(parameters.get("min_abs_score", 1.3)),
         render_plot=bool(parameters.get("render_plot", True)),
     )
 
@@ -1675,6 +1683,11 @@ def build_figures_gwas_manhattan_tasks(config: LoadedConfig) -> list[Task]:
             resolved.gene_map,
             resolved.k,
             resolved.top_n_program_genes,
+            resolved.sampling_trigger_rows,
+            resolved.sampling_base_points,
+            resolved.sampling_fraction,
+            resolved.sampling_max_points,
+            resolved.sampling_seed,
         )
         tasks.append(
             Task(
@@ -2158,7 +2171,6 @@ def build_figures_trait_program_gene_panel_tasks(config: LoadedConfig) -> list[T
             resolved.hit_abs_gamma_threshold,
             resolved.loading_top_n,
             resolved.regulator_fdr_threshold,
-            resolved.min_abs_score,
             int(resolved.render_plot),
             target.association_trait_file,
         )

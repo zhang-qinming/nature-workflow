@@ -182,6 +182,11 @@ workflows:
         geneset_dir: ../data/geneset
       parameters:
         gwas_ids: [PA00638]
+        sampling_trigger_rows: 100000
+        sampling_base_points: 50000
+        sampling_fraction: 0.01
+        sampling_max_points: 300000
+        sampling_seed: 1
 
     program_heatmap:
       parameters:

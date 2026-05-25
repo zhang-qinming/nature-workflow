@@ -27,7 +27,6 @@ TPGP_MAX_GENES_PER_SIDE="${TPGP_MAX_GENES_PER_SIDE:-8}"
 TPGP_HIT_ABS_GAMMA_THRESHOLD="${TPGP_HIT_ABS_GAMMA_THRESHOLD:-0.1}"
 TPGP_LOADING_TOP_N="${TPGP_LOADING_TOP_N:-200}"
 TPGP_REGULATOR_FDR_THRESHOLD="${TPGP_REGULATOR_FDR_THRESHOLD:-0.05}"
-TPGP_MIN_ABS_SCORE="${TPGP_MIN_ABS_SCORE:-1.3}"
 TPGP_RENDER_PLOT="${TPGP_RENDER_PLOT:-1}"
 
 SUCCESS=0
@@ -69,7 +68,7 @@ fi
 
 TEMP_CONFIG="$(mktemp "/tmp/${TASK_NAME}_${LOF_ID}_${SLURM_JOB_ID:-$$}.XXXXXX.yaml")"
 
-python3 - "${LOF_ID}" "${PROJECT_ROOT}" "${BASE_CONFIG}" "${TEMP_CONFIG}" "${OUTPUT_ROOT}" "${OUTPUT_DIR}" "${FILE_ID_MAP}" "${TPGP_K}" "${TPGP_MAX_PROGRAMS}" "${TPGP_MAX_GENES_PER_SIDE}" "${TPGP_HIT_ABS_GAMMA_THRESHOLD}" "${TPGP_LOADING_TOP_N}" "${TPGP_REGULATOR_FDR_THRESHOLD}" "${TPGP_MIN_ABS_SCORE}" "${TPGP_RENDER_PLOT}" <<'PYEOF'
+python3 - "${LOF_ID}" "${PROJECT_ROOT}" "${BASE_CONFIG}" "${TEMP_CONFIG}" "${OUTPUT_ROOT}" "${OUTPUT_DIR}" "${FILE_ID_MAP}" "${TPGP_K}" "${TPGP_MAX_PROGRAMS}" "${TPGP_MAX_GENES_PER_SIDE}" "${TPGP_HIT_ABS_GAMMA_THRESHOLD}" "${TPGP_LOADING_TOP_N}" "${TPGP_REGULATOR_FDR_THRESHOLD}" "${TPGP_RENDER_PLOT}" <<'PYEOF'
 import sys
 from pathlib import Path
 
@@ -88,8 +87,7 @@ max_genes_per_side = int(sys.argv[10])
 hit_abs_gamma_threshold = float(sys.argv[11])
 loading_top_n = int(sys.argv[12])
 regulator_fdr_threshold = float(sys.argv[13])
-min_abs_score = float(sys.argv[14])
-render_plot = sys.argv[15].strip().lower() in {"1", "true", "yes", "on"}
+render_plot = sys.argv[14].strip().lower() in {"1", "true", "yes", "on"}
 
 with open(base_path, encoding="utf-8") as handle:
     config = yaml.safe_load(handle)
@@ -122,7 +120,6 @@ config["workflows"]["figures"]["trait_program_gene_panel"] = {
         "hit_abs_gamma_threshold": hit_abs_gamma_threshold,
         "loading_top_n": loading_top_n,
         "regulator_fdr_threshold": regulator_fdr_threshold,
-        "min_abs_score": min_abs_score,
         "render_plot": render_plot,
     },
 }

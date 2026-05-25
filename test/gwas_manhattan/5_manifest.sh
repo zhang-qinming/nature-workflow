@@ -23,17 +23,27 @@ mkdir -p "${META_DIR}"
 mapfile -t ALL_IDS < <(awk -F '\t' 'NR > 1 { sub(/\r$/, "", $1); print $1 }' "${FILE_ID_MAP}")
 
 {
-    printf 'figure_id\tfigure_kind\tsource_id\ttable_path\tvariants_path\thits_path\tplot_pdf\tplot_png\tstatus\n'
+    printf 'figure_id\tfigure_kind\tsource_id\ttable_path\tvariants_path\thits_path\tplot_pdf\tplot_png\tstatus\tsampling_applied\ttotal_input_rows\ttarget_sample_rows\tsampled_output_rows\n'
     for source_id in "${ALL_IDS[@]}"; do
         variants_path="${TABLES_DIR}/${source_id}_variants.tsv"
         hits_path="${TABLES_DIR}/${source_id}_hits.tsv"
         plot_pdf="${PLOTS_DIR}/${source_id}.pdf"
         plot_png="${PLOTS_DIR}/${source_id}.png"
         status="missing"
+        sampling_applied=""
+        total_input_rows=""
+        target_sample_rows=""
+        sampled_output_rows=""
         [ -f "${STATUS_DIR}/${source_id}.ok" ] && status="ok"
         [ -f "${STATUS_DIR}/${source_id}.failed" ] && status="failed"
         [ -f "${STATUS_DIR}/${source_id}.running" ] && [ "${status}" = "missing" ] && status="running"
-        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        if [ -f "${variants_path}" ]; then
+            row="$(awk -F '\t' 'NR == 2 { print $(NF-3) "\t" $(NF-2) "\t" $(NF-1) "\t" $NF }' "${variants_path}")"
+            if [ -n "${row}" ]; then
+                IFS=$'\t' read -r total_input_rows target_sample_rows sampled_output_rows sampling_applied <<< "${row}"
+            fi
+        fi
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
             "${source_id}" \
             "gwas_manhattan" \
             "${source_id}" \
@@ -42,7 +52,11 @@ mapfile -t ALL_IDS < <(awk -F '\t' 'NR > 1 { sub(/\r$/, "", $1); print $1 }' "${
             "${hits_path}" \
             "${plot_pdf}" \
             "${plot_png}" \
-            "${status}"
+            "${status}" \
+            "${sampling_applied}" \
+            "${total_input_rows}" \
+            "${target_sample_rows}" \
+            "${sampled_output_rows}"
     done
 } > "${MANIFEST_OUT}"
 

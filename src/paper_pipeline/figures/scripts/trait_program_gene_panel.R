@@ -14,9 +14,8 @@ max_genes_per_side <- if (length(args) >= 11) as.numeric(args[11]) else 8
 hit_abs_gamma_threshold <- if (length(args) >= 12) as.numeric(args[12]) else 0.1
 loading_top_n <- if (length(args) >= 13) as.numeric(args[13]) else 200
 regulator_fdr_threshold <- if (length(args) >= 14) as.numeric(args[14]) else 0.05
-min_abs_score <- if (length(args) >= 15) as.numeric(args[15]) else 1.3
-render_plot <- if (length(args) >= 16) as.character(args[16]) else "1"
-association_trait_file <- if (length(args) >= 17) as.character(args[17]) else ""
+render_plot <- if (length(args) >= 15) as.character(args[15]) else "1"
+association_trait_file <- if (length(args) >= 16) as.character(args[16]) else ""
 
 script_path_arg <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
 script_dir <- if (length(script_path_arg) > 0) {
@@ -229,21 +228,10 @@ select_top_programs <- function(df, score_col, sig_col, n) {
   if (nrow(df) == 0 || n <= 0) {
     return(character())
   }
-  sig <- as.logical(df[[sig_col]])
-  sig[is.na(sig)] <- FALSE
-  score <- abs(as.numeric(df[[score_col]]))
-  score[!is.finite(score)] <- 0
-  keep <- isTRUE(any(sig)) & sig
-  keep <- keep | score >= min_abs_score
-  candidates <- df[keep, , drop = FALSE]
-  if (nrow(candidates) == 0) {
-    candidates <- df
-  }
-  candidate_sig <- as.logical(candidates[[sig_col]])
-  candidate_sig[is.na(candidate_sig)] <- FALSE
-  candidate_score <- abs(as.numeric(candidates[[score_col]]))
-  candidate_score[!is.finite(candidate_score)] <- 0
-  candidates <- candidates[order(!candidate_sig, -candidate_score, candidates$Program), , drop = FALSE]
+  candidates <- df
+  candidates$selection_score <- abs(as.numeric(candidates[[score_col]]))
+  candidates$selection_score[!is.finite(candidates$selection_score)] <- 0
+  candidates <- candidates[order(-candidates$selection_score, candidates$Program), , drop = FALSE]
   head(as.character(candidates$Program), n)
 }
 
@@ -303,11 +291,7 @@ if (nrow(regulator_df) > 0) {
   regulator_df$rank_within_side <- numeric()
 }
 
-trait_hits <- posterior_df[!is.na(posterior_df$abs_gamma) & posterior_df$abs_gamma >= hit_abs_gamma_threshold, , drop = FALSE]
-if (nrow(trait_hits) == 0) {
-  trait_hits <- posterior_df[order(-posterior_df$abs_gamma), , drop = FALSE]
-  trait_hits <- head(trait_hits, min(30, nrow(trait_hits)))
-}
+trait_hits <- posterior_df[!is.na(posterior_df$abs_gamma) & posterior_df$abs_gamma > hit_abs_gamma_threshold, , drop = FALSE]
 
 side_hit_cols <- c("Program", "side", "gene", "ensg", "post_mean", "abs_gamma", "gamma_sign", "membership_score", "rank_within_side")
 

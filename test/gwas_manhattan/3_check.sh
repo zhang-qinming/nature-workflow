@@ -28,6 +28,7 @@ stale=0
 pdf=0
 table_main=0
 table_hits=0
+sampled=0
 failed_files=()
 stale_ids=()
 reconciled_stale=0
@@ -70,7 +71,12 @@ for source_id in "${ALL_IDS[@]}"; do
     fi
 
     [ -f "${OUTPUT_DIR}/plots/${source_id}.pdf" ] && ((pdf++)) || true
-    [ -f "${OUTPUT_DIR}/tables/${source_id}_variants.tsv" ] && ((table_main++)) || true
+    if [ -f "${OUTPUT_DIR}/tables/${source_id}_variants.tsv" ]; then
+        ((table_main++)) || true
+        if awk -F '\t' 'NR == 2 { if (tolower($NF) == "true") exit 0; exit 1 } END { if (NR < 2) exit 1 }' "${OUTPUT_DIR}/tables/${source_id}_variants.tsv"; then
+            ((sampled++)) || true
+        fi
+    fi
     [ -f "${OUTPUT_DIR}/tables/${source_id}_hits.tsv" ] && ((table_hits++)) || true
 done
 
@@ -101,6 +107,7 @@ echo ""
 echo "PDF:       ${pdf}"
 echo "Variants TSV: ${table_main}"
 echo "Hits TSV:     ${table_hits}"
+echo "Sampled TSV:  ${sampled}"
 
 if [ "${failed}" -gt 0 ]; then
     echo ""
