@@ -42,9 +42,16 @@ make_empty_side_hits <- function() {
     gamma_sign = character(),
     membership_score = numeric(),
     rank_within_side = integer(),
-    predicted_sign = numeric(),
-    post_mean_sign = numeric(),
+    program_trait_sign = character(),
+    regulator_program_sign = character(),
+    predicted_sign = character(),
+    post_mean_sign = character(),
+    is_concordant = logical(),
     is_discordant = logical(),
+    display_bucket = character(),
+    display_bucket_label = character(),
+    display_column = character(),
+    display_column_rank = integer(),
     program_label = character(),
     gene_label = character(),
     display_rank = integer(),
@@ -56,6 +63,15 @@ make_empty_side_hits <- function() {
     empty_reason = character(),
     stringsAsFactors = FALSE
   )
+}
+
+sign_to_label <- function(values) {
+  values <- as.numeric(values)
+  labels <- rep("zero", length(values))
+  labels[is.na(values)] <- ""
+  labels[!is.na(values) & values > 0] <- "positive"
+  labels[!is.na(values) & values < 0] <- "negative"
+  labels
 }
 
 write_placeholder_plot <- function(program_summary, plot_prefix, trait_id, max_genes_per_side, message_text) {
@@ -406,27 +422,62 @@ program_summary$y_center <- if (panel_rows > 0) {
 } else {
   numeric()
 }
+program_mean_sign <- sign(program_summary$MEANgamma_top100 - program_summary$shet_adjusted_random_mean)
+names(program_mean_sign) <- program_summary$Program
+program_summary$program_trait_sign <- sign_to_label(program_mean_sign)
 
 if (has_overlap) {
-  program_mean_sign <- sign(program_summary$MEANgamma_top100 - program_summary$shet_adjusted_random_mean)
-  names(program_mean_sign) <- program_summary$Program
-
   regulator_sign_lookup <- if (nrow(regulator_df) > 0) {
     setNames(sign(regulator_df$beta), paste(regulator_df$Program, regulator_df$gene, sep = "::"))
   } else {
     character()
   }
 
-  side_hits$predicted_sign <- 0
   is_loading <- side_hits$side == "program_loading"
-  side_hits$predicted_sign[is_loading] <- unname(program_mean_sign[side_hits$Program[is_loading]])
+  side_hits$program_trait_sign_value <- unname(program_mean_sign[side_hits$Program])
+  side_hits$program_trait_sign_value[is.na(side_hits$program_trait_sign_value)] <- 0
+  side_hits$regulator_program_sign_value <- 0
   if (any(!is_loading)) {
     reg_keys <- paste(side_hits$Program[!is_loading], side_hits$gene[!is_loading], sep = "::")
-    side_hits$predicted_sign[!is_loading] <- unname(regulator_sign_lookup[reg_keys])
+    side_hits$regulator_program_sign_value[!is_loading] <- unname(regulator_sign_lookup[reg_keys])
   }
-  side_hits$predicted_sign[is.na(side_hits$predicted_sign)] <- 0
-  side_hits$post_mean_sign <- sign(side_hits$post_mean)
-  side_hits$is_discordant <- side_hits$predicted_sign != 0 & side_hits$post_mean_sign != 0 & side_hits$predicted_sign == -side_hits$post_mean_sign
+  side_hits$regulator_program_sign_value[is.na(side_hits$regulator_program_sign_value)] <- 0
+  side_hits$predicted_sign_value <- side_hits$program_trait_sign_value
+  side_hits$predicted_sign_value[!is_loading] <- (
+    side_hits$program_trait_sign_value[!is_loading] *
+      side_hits$regulator_program_sign_value[!is_loading]
+  )
+  side_hits$post_mean_sign_value <- sign(side_hits$post_mean)
+  side_hits$is_concordant <- (
+    side_hits$predicted_sign_value != 0 &
+      side_hits$post_mean_sign_value != 0 &
+      side_hits$predicted_sign_value == side_hits$post_mean_sign_value
+  )
+  side_hits$is_discordant <- (
+    side_hits$predicted_sign_value != 0 &
+      side_hits$post_mean_sign_value != 0 &
+      side_hits$predicted_sign_value == -side_hits$post_mean_sign_value
+  )
+  side_hits$program_trait_sign <- sign_to_label(side_hits$program_trait_sign_value)
+  side_hits$regulator_program_sign <- ""
+  side_hits$regulator_program_sign[!is_loading] <- sign_to_label(side_hits$regulator_program_sign_value[!is_loading])
+  side_hits$predicted_sign <- sign_to_label(side_hits$predicted_sign_value)
+  side_hits$post_mean_sign <- sign_to_label(side_hits$post_mean_sign_value)
+  side_hits$display_bucket <- ifelse(
+    is_loading,
+    "program_genes",
+    ifelse(side_hits$regulator_program_sign_value < 0, "negative_regulators", "positive_regulators")
+  )
+  side_hits$display_bucket_label <- ifelse(
+    side_hits$display_bucket == "program_genes",
+    "Program genes",
+    ifelse(side_hits$display_bucket == "negative_regulators", "Negative regulators", "Positive regulators")
+  )
+  side_hits$display_column <- ifelse(
+    side_hits$predicted_sign_value == 0,
+    ifelse(side_hits$post_mean_sign_value < 0, "right", "left"),
+    ifelse(side_hits$post_mean_sign_value == side_hits$predicted_sign_value, "left", "right")
+  )
 
   label_lookup <- setNames(program_summary$program_label, program_summary$Program)
   side_hits$program_label <- unname(label_lookup[side_hits$Program])
@@ -439,6 +490,13 @@ if (has_overlap) {
     side_hits$rank_within_side,
     side_hits$Program,
     side_hits$side,
+    FUN = function(x) seq_along(x)
+  )
+  side_hits$display_column_rank <- ave(
+    side_hits$display_rank,
+    side_hits$Program,
+    side_hits$display_bucket,
+    side_hits$display_column,
     FUN = function(x) seq_along(x)
   )
   side_hits$x <- ifelse(side_hits$side == "program_loading", -1, 1)
