@@ -9,13 +9,14 @@ trait_id <- as.character(args[6])
 k <- as.numeric(args[7])
 table_prefix <- as.character(args[8])
 plot_prefix <- as.character(args[9])
-max_programs <- if (length(args) >= 10) as.numeric(args[10]) else 8
-max_genes_per_side <- if (length(args) >= 11) as.numeric(args[11]) else 8
-hit_abs_gamma_threshold <- if (length(args) >= 12) as.numeric(args[12]) else 0.1
-loading_top_n <- if (length(args) >= 13) as.numeric(args[13]) else 200
-regulator_fdr_threshold <- if (length(args) >= 14) as.numeric(args[14]) else 0.05
-render_plot <- if (length(args) >= 15) as.character(args[15]) else "1"
-association_trait_file <- if (length(args) >= 16) as.character(args[16]) else ""
+max_programs_left <- if (length(args) >= 10) as.numeric(args[10]) else 5
+max_programs_right <- if (length(args) >= 11) as.numeric(args[11]) else 3
+max_genes_per_side <- if (length(args) >= 12) as.numeric(args[12]) else 8
+hit_abs_gamma_threshold <- if (length(args) >= 13) as.numeric(args[13]) else 0.1
+loading_top_n <- if (length(args) >= 14) as.numeric(args[14]) else 200
+regulator_fdr_threshold <- if (length(args) >= 15) as.numeric(args[15]) else 0.05
+render_plot <- if (length(args) >= 16) as.character(args[16]) else "1"
+association_trait_file <- if (length(args) >= 17) as.character(args[17]) else ""
 
 script_path_arg <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
 script_dir <- if (length(script_path_arg) > 0) {
@@ -235,19 +236,20 @@ select_top_programs <- function(df, score_col, sig_col, n) {
   head(as.character(candidates$Program), n)
 }
 
-max_programs <- max(1, as.integer(max_programs))
-max_programs_per_panel <- max(1, ceiling(max_programs / 2))
+max_programs_left <- max(1, as.integer(max_programs_left))
+max_programs_right <- max(1, as.integer(max_programs_right))
+max_programs_total <- max_programs_left + max_programs_right
 program_selected <- select_top_programs(
   program_summary_all,
   "program_score",
   "program_sig",
-  max_programs_per_panel
+  max_programs_left
 )
 regulator_selected <- select_top_programs(
   program_summary_all,
   "regulator_score",
   "regulator_sig",
-  max_programs_per_panel
+  max_programs_right
 )
 selected_programs <- unique(c(program_selected, regulator_selected))
 
@@ -257,7 +259,7 @@ if (length(selected_programs) == 0) {
     -program_summary_all$priority_score,
     program_summary_all$Program
   ), , drop = FALSE]
-  selected_programs <- head(as.character(program_summary_all$Program), max_programs)
+  selected_programs <- head(as.character(program_summary_all$Program), max_programs_total)
 }
 
 program_summary <- program_summary_all[

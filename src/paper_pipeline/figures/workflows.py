@@ -233,7 +233,8 @@ class ResolvedFiguresTraitProgramGenePanel:
     output_dir: Path
     targets: tuple[TraitProgramGenePanelTarget, ...]
     k: int
-    max_programs: int
+    max_programs_left: int
+    max_programs_right: int
     max_genes_per_side: int
     hit_abs_gamma_threshold: float
     loading_top_n: int
@@ -1307,6 +1308,13 @@ def _resolve_figures_trait_program_gene_panel(config: LoadedConfig) -> ResolvedF
         )
 
     k = int(parameters.get("k", 60))
+    legacy_max_programs = int(parameters.get("max_programs", 8))
+    max_programs_left = int(parameters.get("max_programs_left", 5))
+    max_programs_right = int(parameters.get("max_programs_right", 3))
+    if "max_programs_left" not in parameters and "max_programs_right" not in parameters and "max_programs" in parameters:
+        max_programs_left = max(1, (legacy_max_programs + 1) // 2)
+        max_programs_right = max(1, (legacy_max_programs + 1) // 2)
+
     return ResolvedFiguresTraitProgramGenePanel(
         config=config,
         program_association_dir=config.resolve_path(inputs.get("program_association_dir"))
@@ -1320,7 +1328,8 @@ def _resolve_figures_trait_program_gene_panel(config: LoadedConfig) -> ResolvedF
         output_dir=config.resolve_path_or_artifact(outputs.get("output_dir"), "trait_program_gene_panel"),
         targets=tuple(targets),
         k=k,
-        max_programs=int(parameters.get("max_programs", 8)),
+        max_programs_left=max_programs_left,
+        max_programs_right=max_programs_right,
         max_genes_per_side=int(parameters.get("max_genes_per_side", 8)),
         hit_abs_gamma_threshold=float(parameters.get("hit_abs_gamma_threshold", 0.1)),
         loading_top_n=int(parameters.get("loading_top_n", 200)),
@@ -2166,7 +2175,8 @@ def build_figures_trait_program_gene_panel_tasks(config: LoadedConfig) -> list[T
             resolved.k,
             table_prefix,
             plot_prefix,
-            resolved.max_programs,
+            resolved.max_programs_left,
+            resolved.max_programs_right,
             resolved.max_genes_per_side,
             resolved.hit_abs_gamma_threshold,
             resolved.loading_top_n,

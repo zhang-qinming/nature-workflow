@@ -362,7 +362,8 @@ workflows:
       parameters:
         lof_ids: [GCST90081631]
         k: 60
-        max_programs: 8
+        max_programs_left: 5
+        max_programs_right: 3
         max_genes_per_side: 8
         hit_abs_gamma_threshold: 0.1
         loading_top_n: 200

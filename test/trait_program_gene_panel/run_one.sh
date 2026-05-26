@@ -22,7 +22,8 @@ CONDA_SH="${CONDA_SH:-${HOME}/miniconda3/etc/profile.d/conda.sh}"
 CONTROL_ENV="${CONTROL_ENV:-paper-pipeline-control}"
 
 TPGP_K="${TPGP_K:-60}"
-TPGP_MAX_PROGRAMS="${TPGP_MAX_PROGRAMS:-8}"
+TPGP_MAX_PROGRAMS_LEFT="${TPGP_MAX_PROGRAMS_LEFT:-5}"
+TPGP_MAX_PROGRAMS_RIGHT="${TPGP_MAX_PROGRAMS_RIGHT:-3}"
 TPGP_MAX_GENES_PER_SIDE="${TPGP_MAX_GENES_PER_SIDE:-8}"
 TPGP_HIT_ABS_GAMMA_THRESHOLD="${TPGP_HIT_ABS_GAMMA_THRESHOLD:-0.1}"
 TPGP_LOADING_TOP_N="${TPGP_LOADING_TOP_N:-200}"
@@ -68,7 +69,7 @@ fi
 
 TEMP_CONFIG="$(mktemp "/tmp/${TASK_NAME}_${LOF_ID}_${SLURM_JOB_ID:-$$}.XXXXXX.yaml")"
 
-python3 - "${LOF_ID}" "${PROJECT_ROOT}" "${BASE_CONFIG}" "${TEMP_CONFIG}" "${OUTPUT_ROOT}" "${OUTPUT_DIR}" "${FILE_ID_MAP}" "${TPGP_K}" "${TPGP_MAX_PROGRAMS}" "${TPGP_MAX_GENES_PER_SIDE}" "${TPGP_HIT_ABS_GAMMA_THRESHOLD}" "${TPGP_LOADING_TOP_N}" "${TPGP_REGULATOR_FDR_THRESHOLD}" "${TPGP_RENDER_PLOT}" <<'PYEOF'
+python3 - "${LOF_ID}" "${PROJECT_ROOT}" "${BASE_CONFIG}" "${TEMP_CONFIG}" "${OUTPUT_ROOT}" "${OUTPUT_DIR}" "${FILE_ID_MAP}" "${TPGP_K}" "${TPGP_MAX_PROGRAMS_LEFT}" "${TPGP_MAX_PROGRAMS_RIGHT}" "${TPGP_MAX_GENES_PER_SIDE}" "${TPGP_HIT_ABS_GAMMA_THRESHOLD}" "${TPGP_LOADING_TOP_N}" "${TPGP_REGULATOR_FDR_THRESHOLD}" "${TPGP_RENDER_PLOT}" <<'PYEOF'
 import sys
 from pathlib import Path
 
@@ -82,12 +83,13 @@ output_root = Path(sys.argv[5])
 output_dir = Path(sys.argv[6])
 file_id_map = Path(sys.argv[7])
 k = int(sys.argv[8])
-max_programs = int(sys.argv[9])
-max_genes_per_side = int(sys.argv[10])
-hit_abs_gamma_threshold = float(sys.argv[11])
-loading_top_n = int(sys.argv[12])
-regulator_fdr_threshold = float(sys.argv[13])
-render_plot = sys.argv[14].strip().lower() in {"1", "true", "yes", "on"}
+max_programs_left = int(sys.argv[9])
+max_programs_right = int(sys.argv[10])
+max_genes_per_side = int(sys.argv[11])
+hit_abs_gamma_threshold = float(sys.argv[12])
+loading_top_n = int(sys.argv[13])
+regulator_fdr_threshold = float(sys.argv[14])
+render_plot = sys.argv[15].strip().lower() in {"1", "true", "yes", "on"}
 
 with open(base_path, encoding="utf-8") as handle:
     config = yaml.safe_load(handle)
@@ -115,7 +117,8 @@ config["workflows"]["figures"]["trait_program_gene_panel"] = {
     "parameters": {
         "lof_ids": [lof_id],
         "k": k,
-        "max_programs": max_programs,
+        "max_programs_left": max_programs_left,
+        "max_programs_right": max_programs_right,
         "max_genes_per_side": max_genes_per_side,
         "hit_abs_gamma_threshold": hit_abs_gamma_threshold,
         "loading_top_n": loading_top_n,
