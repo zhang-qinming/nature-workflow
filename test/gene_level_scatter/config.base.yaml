@@ -1,0 +1,20 @@
+project_root: ../..
+artifact_root: /gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all/outputs
+
+executables:
+  plot_rscript:
+    - conda
+    - run
+    - --no-capture-output
+    - -n
+    - paper-pipeline-plot
+    - Rscript
+
+workflows:
+  figures:
+    shared_inputs:
+      file_id_map: ../../configs/path.file_id_map.tsv
+      posterior_dir: /gpfs/chencao/qinminzhang/workflow/catalog_lof/run_all/outputs/genebayes/posterior
+      gene_map: /gpfs/chencao/qinminzhang/Nature/mine/code/data/gencode_v41_gname_gid_ALL_sorted_onlyID
+
+    shared_parameters: {}
