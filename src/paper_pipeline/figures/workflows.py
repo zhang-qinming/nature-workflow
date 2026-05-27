@@ -230,15 +230,17 @@ class ResolvedFiguresTraitProgramGenePanel:
     regulation_dir: Path
     spectra_path: Path
     gene_map: Path
+    shet_path: Path
     output_dir: Path
     targets: tuple[TraitProgramGenePanelTarget, ...]
     k: int
-    max_programs_left: int
-    max_programs_right: int
+    program_n: int
+    regulator_n: int
     max_genes_per_side: int
     hit_abs_gamma_threshold: float
     loading_top_n: int
     regulator_fdr_threshold: float
+    random_iterations: int
     render_plot: bool
 
 
@@ -1308,12 +1310,8 @@ def _resolve_figures_trait_program_gene_panel(config: LoadedConfig) -> ResolvedF
         )
 
     k = int(parameters.get("k", 60))
-    legacy_max_programs = int(parameters.get("max_programs", 8))
-    max_programs_left = int(parameters.get("max_programs_left", 5))
-    max_programs_right = int(parameters.get("max_programs_right", 3))
-    if "max_programs_left" not in parameters and "max_programs_right" not in parameters and "max_programs" in parameters:
-        max_programs_left = max(1, (legacy_max_programs + 1) // 2)
-        max_programs_right = max(1, (legacy_max_programs + 1) // 2)
+    program_n = int(parameters.get("program_n", parameters.get("max_programs_left", 5)))
+    regulator_n = int(parameters.get("regulator_n", parameters.get("max_programs_right", 3)))
 
     return ResolvedFiguresTraitProgramGenePanel(
         config=config,
@@ -1325,15 +1323,18 @@ def _resolve_figures_trait_program_gene_panel(config: LoadedConfig) -> ResolvedF
         or config.project_root / "outputs" / "perturbseq" / "cnmf_genomewide" / "cNMF" / "cNMF_all" / f"cNMF_all.gene_spectra_score.k_{k}.dt_0_5.txt",
         gene_map=config.resolve_path(inputs.get("gene_map"))
         or config.project_root / "data" / "gencode_v41_gname_gid_ALL_sorted_onlyID",
+        shet_path=config.resolve_path(inputs.get("shet_path"))
+        or config.project_root / "data" / "shet_10bins.txt",
         output_dir=config.resolve_path_or_artifact(outputs.get("output_dir"), "trait_program_gene_panel"),
         targets=tuple(targets),
         k=k,
-        max_programs_left=max_programs_left,
-        max_programs_right=max_programs_right,
+        program_n=program_n,
+        regulator_n=regulator_n,
         max_genes_per_side=int(parameters.get("max_genes_per_side", 8)),
         hit_abs_gamma_threshold=float(parameters.get("hit_abs_gamma_threshold", 0.1)),
         loading_top_n=int(parameters.get("loading_top_n", 200)),
         regulator_fdr_threshold=float(parameters.get("regulator_fdr_threshold", 0.05)),
+        random_iterations=int(parameters.get("random_iterations", 10000)),
         render_plot=bool(parameters.get("render_plot", True)),
     )
 
@@ -2175,12 +2176,14 @@ def build_figures_trait_program_gene_panel_tasks(config: LoadedConfig) -> list[T
             resolved.k,
             table_prefix,
             plot_prefix,
-            resolved.max_programs_left,
-            resolved.max_programs_right,
+            resolved.shet_path,
+            resolved.program_n,
+            resolved.regulator_n,
             resolved.max_genes_per_side,
             resolved.hit_abs_gamma_threshold,
             resolved.loading_top_n,
             resolved.regulator_fdr_threshold,
+            resolved.random_iterations,
             int(resolved.render_plot),
             target.association_trait_file,
         )

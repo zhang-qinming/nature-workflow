@@ -362,12 +362,13 @@ workflows:
       parameters:
         lof_ids: [GCST90081631]
         k: 60
-        max_programs_left: 5
-        max_programs_right: 3
+        program_n: 5
+        regulator_n: 3
         max_genes_per_side: 8
         hit_abs_gamma_threshold: 0.1
         loading_top_n: 200
         regulator_fdr_threshold: 0.05
+        random_iterations: 10000
         render_plot: true
 
     program_heatmap:

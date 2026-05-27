@@ -9,14 +9,16 @@ trait_id <- as.character(args[6])
 k <- as.numeric(args[7])
 table_prefix <- as.character(args[8])
 plot_prefix <- as.character(args[9])
-max_programs_left <- if (length(args) >= 10) as.numeric(args[10]) else 5
-max_programs_right <- if (length(args) >= 11) as.numeric(args[11]) else 3
-max_genes_per_side <- if (length(args) >= 12) as.numeric(args[12]) else 8
-hit_abs_gamma_threshold <- if (length(args) >= 13) as.numeric(args[13]) else 0.1
-loading_top_n <- if (length(args) >= 14) as.numeric(args[14]) else 200
-regulator_fdr_threshold <- if (length(args) >= 15) as.numeric(args[15]) else 0.05
-render_plot <- if (length(args) >= 16) as.character(args[16]) else "1"
-association_trait_file <- if (length(args) >= 17) as.character(args[17]) else ""
+shet_path <- if (length(args) >= 10) as.character(args[10]) else ""
+program_n <- if (length(args) >= 11) as.numeric(args[11]) else 5
+regulator_n <- if (length(args) >= 12) as.numeric(args[12]) else 3
+max_genes_per_side <- if (length(args) >= 13) as.numeric(args[13]) else 8
+hit_abs_gamma_threshold <- if (length(args) >= 14) as.numeric(args[14]) else 0.1
+loading_top_n <- if (length(args) >= 15) as.numeric(args[15]) else 200
+regulator_fdr_threshold <- if (length(args) >= 16) as.numeric(args[16]) else 0.05
+random_iterations <- if (length(args) >= 17) as.numeric(args[17]) else 10000
+render_plot <- if (length(args) >= 18) as.character(args[18]) else "1"
+association_trait_file <- if (length(args) >= 19) as.character(args[19]) else ""
 
 script_path_arg <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
 script_dir <- if (length(script_path_arg) > 0) {
@@ -225,42 +227,190 @@ message(sprintf("Using posterior file: %s", basename(posterior_path)))
 program_summary_all <- read_program_regulator_summary(program_association_dir, trait_file, k, character())
 program_summary_all <- annotate_program_summary(program_summary_all)
 
-select_top_programs <- function(df, score_col, sig_col, n) {
-  if (nrow(df) == 0 || n <= 0) {
+if (!nzchar(shet_path) || !file.exists(shet_path)) {
+  stop(sprintf("trait_program_gene_panel.R requires shet_path, got: %s", shet_path))
+}
+
+program_n <- max(1, as.integer(program_n))
+regulator_n <- max(1, as.integer(regulator_n))
+random_iterations <- max(100, as.integer(random_iterations))
+
+compute_program_selection <- function(posterior_df, spectra_path, gene_map_path, shet_path, k, top_n, random_iterations, n_select) {
+  spectra_raw <- data.table::fread(spectra_path, data.table = FALSE)
+  if (ncol(spectra_raw) < 1) {
+    return(data.frame(Program = character(), P = numeric(), meanG = numeric(), stringsAsFactors = FALSE))
+  }
+  if (is.character(spectra_raw[[1]])) {
+    row.names(spectra_raw) <- spectra_raw[[1]]
+    spectra_raw <- spectra_raw[, -1, drop = FALSE]
+  }
+  spectra_mat <- t(as.matrix(spectra_raw))
+  actual_k <- min(k, ncol(spectra_mat))
+  colnames(spectra_mat) <- paste0("P", seq_len(ncol(spectra_mat)))
+
+  lookups <- build_gene_id_lookups(gene_map_path)
+  spectra_ensg <- normalize_ensg_ids(row.names(spectra_mat))
+  spectra_genes <- unname(lookups$gene_lookup[spectra_ensg])
+  missing_gene <- is.na(spectra_genes) | !nzchar(spectra_genes)
+  spectra_genes[missing_gene] <- spectra_ensg[missing_gene]
+
+  lof_df <- posterior_df[, c("ensg", "post_mean"), drop = FALSE]
+  lof_df$ensg <- normalize_ensg_ids(lof_df$ensg)
+  lof_df$gene <- unname(lookups$gene_lookup[lof_df$ensg])
+  lof_df$gene[is.na(lof_df$gene) | !nzchar(lof_df$gene)] <- lof_df$ensg[is.na(lof_df$gene) | !nzchar(lof_df$gene)]
+  lof_df <- lof_df[!is.na(lof_df$post_mean), , drop = FALSE]
+
+  shet_df <- utils::read.table(shet_path, header = TRUE, stringsAsFactors = FALSE)
+  shet_df$ensg <- normalize_ensg_ids(shet_df$ensg)
+  shet_df <- shet_df[shet_df$ensg %in% lof_df$ensg, , drop = FALSE]
+
+  rows <- list()
+  for (program_index in seq_len(actual_k)) {
+    program_name <- paste0("P", program_index)
+    tmp <- data.frame(
+      gene = spectra_genes,
+      GEPscore = as.numeric(spectra_mat[, program_index]),
+      ensg = spectra_ensg,
+      stringsAsFactors = FALSE
+    )
+    tmp <- tmp[order(tmp$GEPscore, decreasing = TRUE, na.last = NA), , drop = FALSE]
+    tmp <- tmp[!duplicated(tmp$ensg) & nzchar(tmp$ensg), , drop = FALSE]
+    df <- merge(tmp, lof_df, by = "ensg")
+    if (nrow(df) == 0) {
+      next
+    }
+    df2 <- head(df[order(df$GEPscore, decreasing = TRUE), , drop = FALSE], top_n)
+    if (nrow(df2) == 0) {
+      next
+    }
+    mean_gamma_top <- mean(df2$post_mean)
+    shet_tmp <- shet_df[shet_df$ensg %in% df2$ensg, , drop = FALSE]
+    shet_tmp_all <- shet_df[shet_df$ensg %in% df$ensg, , drop = FALSE]
+    if (nrow(shet_tmp) == 0 || nrow(shet_tmp_all) == 0 || !"shet_BIN" %in% names(shet_tmp_all)) {
+      next
+    }
+    A <- table(shet_tmp$shet_BIN)
+    random_means <- numeric()
+    for (seed in seq_len(random_iterations)) {
+      set.seed(seed)
+      sampled_genes <- character()
+      valid <- TRUE
+      for (bin_name in names(A)) {
+        candidates <- shet_tmp_all$ensg[shet_tmp_all$shet_BIN %in% bin_name]
+        if (length(candidates) < A[[bin_name]]) {
+          valid <- FALSE
+          break
+        }
+        sampled_genes <- c(sampled_genes, sample(candidates, A[[bin_name]]))
+      }
+      if (!valid) {
+        next
+      }
+      random_means <- c(random_means, mean(df$post_mean[df$ensg %in% sampled_genes], na.rm = TRUE))
+    }
+    if (length(random_means) == 0) {
+      next
+    }
+    random_mean <- mean(random_means)
+    rank_value <- rank(c(mean_gamma_top, random_means))[1]
+    p1 <- (rank_value / length(random_means)) * 2
+    p2 <- ((length(random_means) + 2 - rank_value) / length(random_means)) * 2
+    rows[[length(rows) + 1]] <- data.frame(
+      Program = program_name,
+      P = min(p1, p2),
+      meanG = mean_gamma_top - random_mean,
+      stringsAsFactors = FALSE
+    )
+  }
+
+  if (length(rows) == 0) {
+    return(data.frame(Program = character(), P = numeric(), meanG = numeric(), stringsAsFactors = FALSE))
+  }
+  program_p_sum <- do.call(rbind, rows)
+  program_p_sum <- program_p_sum[order(abs(program_p_sum$meanG), decreasing = TRUE), , drop = FALSE]
+  program_p_sum <- program_p_sum[order(program_p_sum$P), , drop = FALSE]
+  head(program_p_sum, n_select)
+}
+
+compute_regulator_selection <- function(posterior_df, regulation_dir, gene_map_path, shet_path, k, n_select) {
+  lookups <- build_gene_id_lookups(gene_map_path)
+  reg_mats <- read_regulation_matrices(regulation_dir, k)
+  beta_df <- reg_mats$beta
+  if (nrow(beta_df) == 0) {
     return(character())
   }
-  candidates <- df
-  candidates$selection_score <- abs(as.numeric(candidates[[score_col]]))
-  candidates$selection_score[!is.finite(candidates$selection_score)] <- 0
-  candidates <- candidates[order(-candidates$selection_score, candidates$Program), , drop = FALSE]
-  head(as.character(candidates$Program), n)
+
+  lof_df <- posterior_df[, c("ensg", "post_mean"), drop = FALSE]
+  lof_df$ensg <- normalize_ensg_ids(lof_df$ensg)
+  lof_df$GENE <- unname(lookups$gene_lookup[lof_df$ensg])
+  lof_df$GENE[is.na(lof_df$GENE) | !nzchar(lof_df$GENE)] <- lof_df$ensg[is.na(lof_df$GENE) | !nzchar(lof_df$GENE)]
+  lof_df <- lof_df[!is.na(lof_df$post_mean), c("GENE", "ensg", "post_mean"), drop = FALSE]
+
+  shet_df <- utils::read.table(shet_path, header = TRUE, stringsAsFactors = FALSE)
+  shet_df$ensg <- normalize_ensg_ids(shet_df$ensg)
+  shet_sub <- shet_df[shet_df$ensg %in% lof_df$ensg, , drop = FALSE]
+
+  df <- merge(lof_df, beta_df, by = "GENE")
+  df <- merge(df, shet_sub[, c("ensg", "shet"), drop = FALSE], by = "ensg")
+  if (nrow(df) == 0) {
+    return(character())
+  }
+  keep_cols <- c("post_mean", paste0("P", seq_len(k)), "shet")
+  df <- df[, keep_cols, drop = FALSE]
+  for (i in seq_len(ncol(df))) {
+    finite_values <- df[[i]][is.finite(df[[i]])]
+    if (length(finite_values) == 0) {
+      next
+    }
+    df[[i]][is.infinite(df[[i]])] <- max(finite_values)
+  }
+
+  suppressPackageStartupMessages(library(leaps))
+  fit <- tryCatch(
+    leaps::regsubsets(post_mean ~ ., data = df, nbest = 1, nvmax = n_select + 1, really.big = TRUE),
+    error = function(e) NULL
+  )
+  if (is.null(fit)) {
+    return(character())
+  }
+  fit_sum <- summary(fit)[[1]]
+  regulator_selected <- colnames(fit_sum)[fit_sum[nrow(fit_sum), ]]
+  regulator_selected <- regulator_selected[!regulator_selected %in% c("(Intercept)", "shet")]
+  if (length(regulator_selected) != n_select) {
+    fit <- tryCatch(
+      leaps::regsubsets(post_mean ~ ., data = df, nbest = 1, nvmax = n_select, really.big = TRUE),
+      error = function(e) NULL
+    )
+    if (is.null(fit)) {
+      return(normalize_program_ids(regulator_selected))
+    }
+    fit_sum <- summary(fit)[[1]]
+    regulator_selected <- colnames(fit_sum)[fit_sum[nrow(fit_sum), ]]
+    regulator_selected <- regulator_selected[!regulator_selected %in% c("(Intercept)", "shet")]
+  }
+  normalize_program_ids(regulator_selected)
 }
 
-max_programs_left <- max(1, as.integer(max_programs_left))
-max_programs_right <- max(1, as.integer(max_programs_right))
-max_programs_total <- max_programs_left + max_programs_right
-program_selected <- select_top_programs(
-  program_summary_all,
-  "program_score",
-  "program_sig",
-  max_programs_left
+program_selection_df <- compute_program_selection(
+  posterior_df = posterior_df,
+  spectra_path = spectra_path,
+  gene_map_path = gene_map_path,
+  shet_path = shet_path,
+  k = k,
+  top_n = loading_top_n,
+  random_iterations = random_iterations,
+  n_select = program_n
 )
-regulator_selected <- select_top_programs(
-  program_summary_all,
-  "regulator_score",
-  "regulator_sig",
-  max_programs_right
+program_selected <- normalize_program_ids(program_selection_df$Program)
+regulator_selected <- compute_regulator_selection(
+  posterior_df = posterior_df,
+  regulation_dir = regulation_dir,
+  gene_map_path = gene_map_path,
+  shet_path = shet_path,
+  k = k,
+  n_select = regulator_n
 )
 selected_programs <- unique(c(program_selected, regulator_selected))
-
-if (length(selected_programs) == 0) {
-  program_summary_all <- program_summary_all[order(
-    program_summary_all$priority_tier,
-    -program_summary_all$priority_score,
-    program_summary_all$Program
-  ), , drop = FALSE]
-  selected_programs <- head(as.character(program_summary_all$Program), max_programs_total)
-}
 
 program_summary <- program_summary_all[
   match(selected_programs, program_summary_all$Program, nomatch = 0),
@@ -269,6 +419,8 @@ program_summary <- program_summary_all[
 ]
 program_summary$selected_by_program <- program_summary$Program %in% program_selected
 program_summary$selected_by_regulator <- program_summary$Program %in% regulator_selected
+program_summary$program_selection_p <- unname(stats::setNames(program_selection_df$P, program_selection_df$Program)[program_summary$Program])
+program_summary$program_selection_meanG <- unname(stats::setNames(program_selection_df$meanG, program_selection_df$Program)[program_summary$Program])
 
 spectra_top <- read_spectra_top_genes(spectra_path, gene_map_path, k, loading_top_n)
 spectra_top <- spectra_top[spectra_top$Program %in% selected_programs, , drop = FALSE]
@@ -726,15 +878,6 @@ draw_model_panel <- function(
   side_hits$Program <- as.character(side_hits$Program)
   panel_programs <- program_summary[program_summary$selected_by_program, , drop = FALSE]
   panel_regulators <- program_summary[program_summary$selected_by_regulator, , drop = FALSE]
-  if (nrow(panel_programs) == 0) {
-    panel_programs <- program_summary[order(-abs(program_summary$program_score), program_summary$Program), , drop = FALSE]
-    panel_programs <- head(panel_programs, max(1, ceiling(nrow(program_summary) / 2)))
-  }
-  if (nrow(panel_regulators) == 0) {
-    panel_regulators <- program_summary[order(-abs(program_summary$regulator_score), program_summary$Program), , drop = FALSE]
-    panel_regulators <- head(panel_regulators, max(1, ceiling(nrow(program_summary) / 2)))
-  }
-
   panel_programs <- panel_programs[order(-abs(panel_programs$program_score), panel_programs$Program), , drop = FALSE]
   panel_regulators <- panel_regulators[order(-abs(panel_regulators$regulator_score), panel_regulators$Program), , drop = FALSE]
   gamma_max <- max(abs(as.numeric(side_hits$post_mean)), hit_abs_gamma_threshold, na.rm = TRUE)
