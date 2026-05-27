@@ -128,20 +128,51 @@ df$gene[is.na(df$gene)] <- df$ensg[is.na(df$gene)]
 
 df$signed_log10_p <- sign(df$beta_withShet) * (-log10(pmax(df$P_withShet, .Machine$double.xmin)))
 df$fdr <- p.adjust(df$P_withShet, method = "BH")
+df$abs_post_mean <- abs(df$post_mean)
+df$abs_signed_log10_p <- abs(df$signed_log10_p)
+df$post_mean_sign <- ifelse(df$post_mean > 0, "positive", ifelse(df$post_mean < 0, "negative", "zero"))
+df$regulation_sign <- ifelse(df$beta_withShet > 0, "positive", ifelse(df$beta_withShet < 0, "negative", "zero"))
+df$is_concordant <- df$post_mean_sign == df$regulation_sign &
+  df$post_mean_sign != "zero" &
+  df$regulation_sign != "zero"
+df$is_discordant <- df$post_mean_sign != df$regulation_sign &
+  df$post_mean_sign != "zero" &
+  df$regulation_sign != "zero"
+df$is_concordant[is.na(df$is_concordant)] <- FALSE
+df$is_discordant[is.na(df$is_discordant)] <- FALSE
+df$is_reg_sig <- !is.na(df$fdr) & df$fdr <= 0.05
+df$is_high_effect <- !is.na(df$post_mean) &
+  df$abs_post_mean >= stats::quantile(df$abs_post_mean, probs = 0.95, na.rm = TRUE)
+df$is_high_effect[is.na(df$is_high_effect)] <- FALSE
+df$combined_score <- df$abs_post_mean * df$abs_signed_log10_p
+df$evidence_class <- "background"
+df$evidence_class[df$is_reg_sig & df$is_concordant] <- "regulation_supported"
+df$evidence_class[df$is_reg_sig & df$is_discordant] <- "direction_discordant"
+df$evidence_class[!df$is_reg_sig & df$is_high_effect] <- "posterior_high"
+df$evidence_class <- factor(
+  df$evidence_class,
+  levels = c("background", "posterior_high", "regulation_supported", "direction_discordant")
+)
 df$label <- ""
+df$label_reason <- ""
 
 if (length(highlight_genes) > 0) {
-  df$label[df$gene %in% highlight_genes] <- df$gene[df$gene %in% highlight_genes]
+  highlight_mask <- df$gene %in% highlight_genes
+  df$label[highlight_mask] <- df$gene[highlight_mask]
+  df$label_reason[highlight_mask] <- "highlight_gene"
 }
 
-df$label_score <- abs(df$post_mean) * abs(df$signed_log10_p)
+df$label_score <- df$combined_score
 top_idx <- order(df$label_score, decreasing = TRUE)
 if (length(top_idx) > 0) {
   top_idx <- head(top_idx, top_n_labels)
+  needs_reason <- df$label[top_idx] == ""
   df$label[top_idx] <- df$gene[top_idx]
+  df$label_reason[top_idx[needs_reason]] <- "top_combined_score"
 }
+df$label_reason[df$label != "" & df$label_reason == ""] <- "selected"
 
-threshold_candidates <- df$P_withShet[df$fdr <= 0.05]
+threshold_candidates <- df$P_withShet[!is.na(df$fdr) & df$fdr <= 0.05 & !is.na(df$P_withShet)]
 threshold_y <- if (length(threshold_candidates) > 0) -log10(max(threshold_candidates)) else NA_real_
 
 df$trait_label <- trait_label
@@ -155,23 +186,92 @@ utils::write.table(df, table_path, row.names = FALSE, sep = "\t", quote = FALSE)
 library(ggplot2)
 library(ggrepel)
 
+evidence_colors <- c(
+  "background" = "grey78",
+  "posterior_high" = "#7E8DA6",
+  "regulation_supported" = "#B40426",
+  "direction_discordant" = "#3B4CC0"
+)
+evidence_labels <- c(
+  "background" = "Background",
+  "posterior_high" = "High posterior effect",
+  "regulation_supported" = "Concordant regulation FDR <= 0.05",
+  "direction_discordant" = "Discordant regulation FDR <= 0.05"
+)
+evidence_shapes <- c(
+  "background" = 16,
+  "posterior_high" = 16,
+  "regulation_supported" = 16,
+  "direction_discordant" = 17
+)
+df$point_size <- ifelse(df$is_reg_sig, 2.9, ifelse(df$is_high_effect, 2.3, 1.7))
+df$point_alpha <- ifelse(df$evidence_class == "background", 0.35, 0.82)
+subtitle_text <- sprintf(
+  "Each point is a gene; y sign follows beta_withShet. FDR is BH-adjusted across plotted genes (n=%s).",
+  format(nrow(df), big.mark = ",", scientific = FALSE)
+)
+caption_text <- "Concordant genes have matching posterior and perturb-seq regulation signs; triangles mark significant discordant regulation."
+
 g <- ggplot(df, aes(x = post_mean, y = signed_log10_p))
-g <- g + theme_classic(base_size = 18, base_family = "Helvetica")
-g <- g + geom_point(alpha = 0.6, size = 2.5, color = "#4C78A8")
-g <- g + geom_hline(yintercept = 0, linetype = "dashed", color = "grey60")
-g <- g + geom_vline(xintercept = 0, linetype = "dashed", color = "grey60")
+g <- g + theme_classic(base_size = 17, base_family = "Helvetica")
+g <- g + geom_point(
+  aes(color = evidence_class, shape = evidence_class, size = point_size, alpha = point_alpha),
+  stroke = 0.2
+)
+g <- g + geom_hline(yintercept = 0, linetype = "dashed", color = "grey55", linewidth = 0.35)
+g <- g + geom_vline(xintercept = 0, linetype = "dashed", color = "grey55", linewidth = 0.35)
 if (!is.na(threshold_y)) {
-  g <- g + geom_hline(yintercept = threshold_y, linetype = "dotted", color = "#B40426")
-  g <- g + geom_hline(yintercept = -threshold_y, linetype = "dotted", color = "#B40426")
+  g <- g + geom_hline(yintercept = threshold_y, linetype = "dotted", color = "#B40426", linewidth = 0.45)
+  g <- g + geom_hline(yintercept = -threshold_y, linetype = "dotted", color = "#B40426", linewidth = 0.45)
+  g <- g + annotate(
+    "text",
+    x = Inf,
+    y = threshold_y,
+    label = "FDR 0.05",
+    hjust = 1.04,
+    vjust = -0.45,
+    size = 3.6,
+    color = "#B40426"
+  )
 }
 label_df <- df[df$label != "", , drop = FALSE]
 if (nrow(label_df) > 0) {
-  g <- g + geom_text_repel(data = label_df, aes(label = label),
-    size = 4.5, max.overlaps = Inf, box.padding = 0.4, point.padding = 0.2, min.segment.length = 0)
+  g <- g + geom_text_repel(
+    data = label_df,
+    aes(label = label, color = evidence_class),
+    size = 4.2,
+    fontface = "bold",
+    max.overlaps = Inf,
+    box.padding = 0.45,
+    point.padding = 0.25,
+    min.segment.length = 0,
+    show.legend = FALSE
+  )
 }
+g <- g + scale_color_manual(values = evidence_colors, labels = evidence_labels, drop = FALSE)
+g <- g + scale_shape_manual(values = evidence_shapes, labels = evidence_labels, drop = FALSE)
+g <- g + scale_size_identity()
+g <- g + scale_alpha_identity()
 g <- g + xlab(sprintf("%s posterior effect", trait_label))
-g <- g + ylab("Gene-level signed -log10(P)")
+g <- g + ylab("Perturb-seq regulation evidence, signed -log10(P)")
+g <- g + labs(
+  title = sprintf("Gene-level posterior vs perturb-seq evidence: %s", trait_label),
+  subtitle = subtitle_text,
+  caption = caption_text,
+  color = "Evidence class",
+  shape = "Evidence class"
+)
 g <- g + coord_cartesian(ylim = c(-y_limit, y_limit))
+g <- g + theme(
+  legend.position = "bottom",
+  legend.title = element_text(face = "bold"),
+  legend.box = "vertical",
+  plot.title = element_text(face = "bold"),
+  plot.subtitle = element_text(size = 11, color = "grey30"),
+  plot.caption = element_text(size = 10, color = "grey35", hjust = 0),
+  panel.grid.major = element_line(color = "grey92", linewidth = 0.25),
+  panel.grid.minor = element_blank()
+)
 
 ggsave(plot = g, filename = paste0(plot_prefix, ".pdf"), width = 11, height = 10)
 ggsave(plot = g, filename = paste0(plot_prefix, ".png"), width = 11, height = 10, dpi = 300)
