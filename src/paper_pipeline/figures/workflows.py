@@ -2043,6 +2043,7 @@ def build_figures_cross_trait_heatmap_tasks(config: LoadedConfig) -> list[Task]:
             "figure_kind": "cross_trait_heatmap",
             "trait_target_path": str(target_path),
             "table_prefix": str(table_prefix),
+            "effects_path": str(Path(f"{table_prefix}_effects.tsv")),
             "plot_pdf": str(plot_prefix.with_suffix(".pdf")),
             "plot_png": str(plot_prefix.with_suffix(".png")),
             "method": resolved.method,

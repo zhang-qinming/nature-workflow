@@ -534,3 +534,48 @@ ComplexHeatmap 双面板：上三角 = regulator 相关性 + trait 条形图，�
 | `label_from_ensg(ensg, map_path)` | 批量 ENSG→gene symbol 转换 |
 
 所有脚本参数通过命令行 `commandArgs(trailingOnly = TRUE)` 传入，输出包括 `.tsv` 数据表和 `.pdf`/`.png` 图像。
+
+---
+
+## 2026-05 更新说明
+
+### `gwas_manhattan`
+
+- 当 GWAS 全量文件行数超过 `100000` 时，绘图前会对背景点下采样。
+- 下采样目标为：
+  - `50000 + ceil(1% * total_rows)`
+  - 最终不超过 `300000`
+- 显著点和需要标注的点优先保留，其余背景点随机抽样。
+
+### `trait_program_gene_panel`
+
+当前 `trait_program_gene_panel` 已按论文 Extended Data Fig. 7 的筛选语义更新。
+
+核心参数：
+
+- `program_n`
+- `regulator_n`
+- `loading_top_n`
+- `random_iterations`
+- `shet_path`
+
+当前选择规则：
+
+- 左侧 `program burden`
+  - 使用 `loading_top_n` 个 loading genes（默认 `200`）
+  - 对每个 program 基于 `shet` 分箱匹配的随机基因集重算 enrichment P
+  - 按该 P 排序，取前 `program_n`
+- 右侧 `regulator-burden`
+  - 使用所有 program 的 regulator burden 与 `shet`
+  - 通过 `leaps::regsubsets` 选择前 `regulator_n` 个 program
+
+基因展示过滤：
+
+- trait hit 需满足 `|gamma| > 0.1`（默认）
+- 左侧只展示与 top loading genes 重叠的 hits
+- 右侧只展示 regulator `FDR < 0.05` 且与 trait hit 重叠的 genes
+
+注意：
+
+- `program_n=5`、`regulator_n=3` 是当前示例默认值，对应论文中 MCH 的设置。
+- 这一步是 figure 层选择逻辑；如果上游 `ProgramLevel` 仍按旧的 `top100` 预计算，图中的 program 颜色/score 可能与左侧重新筛选使用的 `top200` 依据不完全同源。

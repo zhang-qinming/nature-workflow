@@ -65,11 +65,13 @@ for (i in seq_along(trait_ids)) {
 }
 
 matrix_df <- data.frame(trait_id = rownames(cor_mat), cor_mat, check.names = FALSE, stringsAsFactors = FALSE)
+effect_matrix_df <- merged_df[, c("ensg", trait_ids), drop = FALSE]
 
 ensure_parent_dir(paste0(table_prefix, "_matrix.tsv"))
 ensure_parent_dir(paste0(plot_prefix, ".pdf"))
 utils::write.table(pairwise_df, paste0(table_prefix, "_pairs.tsv"), row.names = FALSE, sep = "\t", quote = FALSE)
 utils::write.table(matrix_df, paste0(table_prefix, "_matrix.tsv"), row.names = FALSE, sep = "\t", quote = FALSE)
+utils::write.table(effect_matrix_df, paste0(table_prefix, "_effects.tsv"), row.names = FALSE, sep = "\t", quote = FALSE)
 
 plot_df <- data.frame()
 for (i in seq_along(trait_ids)) {

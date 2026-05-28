@@ -252,6 +252,51 @@ workflows:
 
 各 workflow 的输出统一写在 `artifact_root/figures/<workflow>/` 下，按 `tables/`、`plots/`、`meta/` 分类。
 
+## 2026-05 更新
+
+### `gwas_manhattan`
+
+- 当全量 GWAS 行数 `> 100000` 时，绘图前会对背景点下采样。
+- 目标点数计算为：`50000 + ceil(0.01 * total_rows)`。
+- 最终保留点数不会超过 `300000`。
+- 显著位点和需要标注的位点会优先保留，其余背景位点随机抽样。
+
+对应参数：
+
+- `sampling_trigger_rows`
+- `sampling_base_points`
+- `sampling_fraction`
+- `sampling_max_points`
+- `sampling_seed`
+
+### `trait_program_gene_panel`
+
+- 当前实现已不再使用 `max_programs` / `max_programs_left` / `max_programs_right` 作为主参数。
+- 现在按论文 Extended Data Fig. 7 / gene-to-program-to-trait model 的语义使用：
+  - `program_n`
+  - `regulator_n`
+  - `loading_top_n`
+  - `random_iterations`
+  - `shet_path`
+
+当前选择逻辑：
+
+- 左侧 `program burden`：
+  - 使用 `loading_top_n` 个 loading genes（默认 `200`）
+  - 对每个 program 基于 `shet` 分箱匹配随机基因集重算 enrichment
+  - 按重算得到的 `P` 排序后取前 `program_n`
+- 右侧 `regulator-burden`：
+  - 使用全部 program 的 regulator burden + `shet`
+  - 通过 `leaps::regsubsets` 做 stepwise / exhaustive subset selection
+  - 取前 `regulator_n`
+
+说明：
+
+- `program_n=5`、`regulator_n=3` 是当前示例默认值，对应论文 MCH 的设置。
+- 图中 regulator 基因展示仍需满足：
+  - regulator `FDR <= regulator_fdr_threshold`
+  - trait hit `|gamma| > hit_abs_gamma_threshold`
+
 ## 仍需在 Linux 上确认的内容
 
 - `ldsc_py` 和 `liftover` 的真实可执行路径
