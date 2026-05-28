@@ -274,6 +274,7 @@ class ResolvedFiguresCrossTraitHeatmap:
     targets: tuple[CnmfTraitTarget, ...]
     output_id: str
     method: str
+    render_plot: bool
 
 
 def _string_list(value: Any, label: str) -> tuple[str, ...]:
@@ -293,6 +294,22 @@ def _int_list(value: Any, label: str) -> tuple[int, ...]:
         return tuple(int(item) for item in value)
     except (TypeError, ValueError) as exc:
         raise ConfigError(f"{label} must be a list of integers") from exc
+
+
+def _bool_value(value: Any, label: str, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in {0, 1}:
+        return bool(value)
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "on"}:
+            return True
+        if lowered in {"0", "false", "no", "off"}:
+            return False
+    raise ConfigError(f"{label} must be a boolean value")
 
 
 def _mapping_list(value: Any, label: str) -> tuple[dict[str, Any], ...]:
@@ -1208,6 +1225,11 @@ def _resolve_figures_cross_trait_heatmap(config: LoadedConfig) -> ResolvedFigure
         targets=tuple(targets),
         output_id=_normalize_output_id(output_id, "workflows.figures.cross_trait_heatmap.parameters.output_id"),
         method=method,
+        render_plot=_bool_value(
+            parameters.get("render_plot"),
+            "workflows.figures.cross_trait_heatmap.parameters.render_plot",
+            True,
+        ),
     )
 
 
@@ -2028,6 +2050,7 @@ def build_figures_cross_trait_heatmap_tasks(config: LoadedConfig) -> list[Task]:
         table_prefix,
         plot_prefix,
         resolved.method,
+        int(resolved.render_plot),
     )
     tasks.append(
         Task(
@@ -2044,9 +2067,10 @@ def build_figures_cross_trait_heatmap_tasks(config: LoadedConfig) -> list[Task]:
             "trait_target_path": str(target_path),
             "table_prefix": str(table_prefix),
             "effects_path": str(Path(f"{table_prefix}_effects.tsv")),
-            "plot_pdf": str(plot_prefix.with_suffix(".pdf")),
-            "plot_png": str(plot_prefix.with_suffix(".png")),
+            "plot_pdf": str(plot_prefix.with_suffix(".pdf")) if resolved.render_plot else "",
+            "plot_png": str(plot_prefix.with_suffix(".png")) if resolved.render_plot else "",
             "method": resolved.method,
+            "render_plot": str(int(resolved.render_plot)),
         }
     ]
     tasks.append(_write_manifest_task(meta_dir / "manifest.tsv", manifest_rows, "figures-cross-trait-heatmap"))

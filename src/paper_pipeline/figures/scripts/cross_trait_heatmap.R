@@ -5,6 +5,8 @@ gene_map_path <- as.character(args[2])
 table_prefix <- as.character(args[3])
 plot_prefix <- as.character(args[4])
 method <- if (length(args) >= 5) as.character(args[5]) else "pearson"
+render_plot <- if (length(args) >= 6) as.character(args[6]) else "1"
+plot_enabled <- render_plot %in% c("1", "true", "TRUE", "yes", "YES")
 
 targets <- utils::read.table(target_path, header = TRUE, sep = "\t", quote = "", stringsAsFactors = FALSE)
 required_columns <- c("trait_id", "posterior_path")
@@ -68,10 +70,15 @@ matrix_df <- data.frame(trait_id = rownames(cor_mat), cor_mat, check.names = FAL
 effect_matrix_df <- merged_df[, c("ensg", trait_ids), drop = FALSE]
 
 ensure_parent_dir(paste0(table_prefix, "_matrix.tsv"))
-ensure_parent_dir(paste0(plot_prefix, ".pdf"))
 utils::write.table(pairwise_df, paste0(table_prefix, "_pairs.tsv"), row.names = FALSE, sep = "\t", quote = FALSE)
 utils::write.table(matrix_df, paste0(table_prefix, "_matrix.tsv"), row.names = FALSE, sep = "\t", quote = FALSE)
 utils::write.table(effect_matrix_df, paste0(table_prefix, "_effects.tsv"), row.names = FALSE, sep = "\t", quote = FALSE)
+
+if (!plot_enabled) {
+  quit(save = "no", status = 0)
+}
+
+ensure_parent_dir(paste0(plot_prefix, ".pdf"))
 
 plot_df <- data.frame()
 for (i in seq_along(trait_ids)) {
@@ -99,7 +106,9 @@ library(ggplot2)
 g <- ggplot(plot_df, aes(x = trait_x, y = trait_y, fill = correlation))
 g <- g + theme_minimal(base_size = 18, base_family = "Helvetica")
 g <- g + geom_tile(color = "white", linewidth = 0.2)
-g <- g + geom_text(aes(label = sprintf("%.2f", correlation)), size = 4)
+if (length(trait_ids) <= 50) {
+  g <- g + geom_text(aes(label = sprintf("%.2f", correlation)), size = 4)
+}
 g <- g + scale_fill_gradient2(low = "#3B4CC0", mid = "white", high = "#B40426", midpoint = 0, limits = c(-1, 1))
 g <- g + theme(
   axis.title = element_blank(),

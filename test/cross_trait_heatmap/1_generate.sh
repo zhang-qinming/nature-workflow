@@ -29,6 +29,7 @@ SBATCH_TIME="${SBATCH_TIME:-24:00:00}"
 CROSS_TRAIT_IDS="${CROSS_TRAIT_IDS:-}"
 CROSS_TRAIT_METHOD="${CROSS_TRAIT_METHOD:-pearson}"
 CROSS_TRAIT_OUTPUT_ID="${CROSS_TRAIT_OUTPUT_ID:-}"
+CROSS_TRAIT_RENDER_PLOT="${CROSS_TRAIT_RENDER_PLOT:-0}"
 
 mkdir -p "${BATCH_ROOT}" "${GENERATED_DIR}" "${STATUS_DIR}" "${LOGS_DIR}" "${FAILURE_DIR}"
 
@@ -56,16 +57,17 @@ safe_name() {
 }
 
 IDS=()
-if [ -n "${CROSS_TRAIT_IDS}" ]; then
-    IFS=',' read -r -a RAW_IDS <<< "${CROSS_TRAIT_IDS}"
-    for raw_id in "${RAW_IDS[@]}"; do
-        raw_id="$(trim "${raw_id}")"
-        [ -z "${raw_id}" ] && continue
-        IDS+=("${raw_id}")
-    done
-else
-    mapfile -t IDS < <(awk -F '\t' 'NR > 1 { sub(/\r$/, "", $2); print $2 }' "${FILE_ID_MAP}")
+if [ -z "${CROSS_TRAIT_IDS}" ]; then
+    echo "Set CROSS_TRAIT_IDS=id1,id2,... to generate a cross-trait heatmap." >&2
+    echo "The full file_id_map is intentionally not used by default because it can contain thousands of traits." >&2
+    exit 1
 fi
+IFS=',' read -r -a RAW_IDS <<< "${CROSS_TRAIT_IDS}"
+for raw_id in "${RAW_IDS[@]}"; do
+    raw_id="$(trim "${raw_id}")"
+    [ -z "${raw_id}" ] && continue
+    IDS+=("${raw_id}")
+done
 
 if [ "${#IDS[@]}" -lt 2 ]; then
     echo "cross_trait_heatmap requires at least two LoF IDs." >&2
@@ -114,6 +116,7 @@ export STATUS_DIR=${STATUS_DIR}
 export LOGS_DIR=${LOGS_DIR}
 export FAILURE_DIR=${FAILURE_DIR}
 export CROSS_TRAIT_METHOD=${CROSS_TRAIT_METHOD}
+export CROSS_TRAIT_RENDER_PLOT=${CROSS_TRAIT_RENDER_PLOT}
 
 bash ${WORKER_SCRIPT}
 EOF
@@ -128,4 +131,6 @@ echo "Generated cross-trait heatmap sbatch script: ${script_path}"
 echo "Manifest: ${MANIFEST_PATH}"
 echo "Output ID: ${CROSS_TRAIT_OUTPUT_ID}"
 echo "LoF IDs: ${#IDS[@]}"
+echo "Render plot: ${CROSS_TRAIT_RENDER_PLOT}"
+echo "Note: cross_trait_heatmap is group-level; one selected trait set generates one sbatch job."
 echo "Next: bash test/cross_trait_heatmap/2_submit.sh"
