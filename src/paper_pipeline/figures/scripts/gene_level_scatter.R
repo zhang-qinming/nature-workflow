@@ -1,15 +1,15 @@
 args <- commandArgs(trailingOnly = TRUE)
 
 posterior_path <- as.character(args[1])
-limma_path      <- as.character(args[2])
-shet_path       <- as.character(args[3])
-trait_label     <- as.character(args[4])
-table_path      <- as.character(args[5])
-plot_prefix     <- as.character(args[6])
-top_n_labels    <- if (length(args) >= 7) as.numeric(args[7]) else 8
+limma_path <- as.character(args[2])
+shet_path <- as.character(args[3])
+trait_label <- as.character(args[4])
+table_path <- as.character(args[5])
+plot_prefix <- as.character(args[6])
+top_n_labels <- if (length(args) >= 7) as.numeric(args[7]) else 8
 highlight_genes_raw <- if (length(args) >= 8) as.character(args[8]) else ""
-y_limit         <- if (length(args) >= 9) as.numeric(args[9]) else 8
-gene_map_path   <- if (length(args) >= 10) as.character(args[10]) else ""
+y_limit <- if (length(args) >= 9) as.numeric(args[9]) else 8
+gene_map_path <- if (length(args) >= 10) as.character(args[10]) else ""
 
 script_path_arg <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
 script_dir <- if (length(script_path_arg) > 0) {
@@ -22,8 +22,9 @@ source(file.path(script_dir, "helpers.R"))
 highlight_genes <- trimws(strsplit(highlight_genes_raw, ",", fixed = TRUE)[[1]])
 highlight_genes <- highlight_genes[nzchar(highlight_genes)]
 
-# ── 读输入 ──
 options(scipen = 10)
+
+# Read GeneBayes posterior effects.
 posterior_df <- data.table::fread(posterior_path, data.table = FALSE)
 if (!all(c("ensg", "post_mean") %in% names(posterior_df))) {
   stop(sprintf("Posterior file %s must have columns: ensg, post_mean", posterior_path))
@@ -31,31 +32,31 @@ if (!all(c("ensg", "post_mean") %in% names(posterior_df))) {
 posterior_df$ensg <- normalize_ensg_ids(posterior_df$ensg)
 posterior_df$post_mean[is.infinite(posterior_df$post_mean)] <- NA
 
-# limma logFC 矩阵（行=表达基因, 列=扰动基因）
+# Read limma logFC matrix: rows are expression genes, columns are perturbation genes.
 limma_raw <- data.table::fread(limma_path, data.table = FALSE)
 limma_mat <- as.matrix(limma_raw[, -1, drop = FALSE])
 row.names(limma_mat) <- limma_raw[[1]]
 target_ids <- row.names(limma_mat)
 perturb_ids <- colnames(limma_mat)
 
-# shet 协变量
+# Read shet covariate table.
 shet_df <- utils::read.table(shet_path, header = TRUE, stringsAsFactors = FALSE)
 shet_df$ensg <- normalize_ensg_ids(shet_df$ensg)
 
-# ── 基因映射：ensg ↔ gene symbol ──
+# Gene ID mapping: ENSG to gene symbol.
 lookups <- build_gene_id_lookups(gene_map_path)
 gene_lookup <- lookups$gene_lookup
 target_ensg <- lookups$resolve_to_ensg(target_ids)
 perturb_ensg <- lookups$resolve_to_ensg(perturb_ids)
 
-# ── 对每个 target gene 算相关性 ──
+# Compute one regulation-evidence model per target gene.
 shet_sub <- shet_df[shet_df$ensg %in% posterior_df$ensg, ]
 n_targets <- nrow(limma_mat)
 
 corr_list <- lapply(seq_len(n_targets), function(i) {
-  pb <- limma_mat[i, ]  # perturb_beta 向量（扰动基因索引）
+  pb <- limma_mat[i, ]
   pb_df <- data.frame(
-    gene         = perturb_ids,
+    gene = perturb_ids,
     perturb_beta = as.numeric(pb),
     stringsAsFactors = FALSE
   )
@@ -64,33 +65,41 @@ corr_list <- lapply(seq_len(n_targets), function(i) {
   df <- merge(pb_df, posterior_df[, c("ensg", "post_mean")], by = "ensg", all = FALSE)
   df <- df[!is.na(df$ensg) & !is.na(df$post_mean) & !is.na(df$perturb_beta), ]
   if (!is.na(target_ensg[i])) {
-    df <- df[df$ensg != target_ensg[i], ]  # 去掉靶基因本身
+    df <- df[df$ensg != target_ensg[i], ]
   }
   df <- merge(df, shet_sub, by = "ensg", all = FALSE)
-  if (nrow(df) < 10) return(NULL)
+  if (nrow(df) < 10) {
+    return(NULL)
+  }
   if (stats::sd(df$post_mean, na.rm = TRUE) == 0 || stats::sd(df$perturb_beta, na.rm = TRUE) == 0) {
     return(NULL)
   }
 
-  df$post_mean_sc   <- scale(df$post_mean)
+  df$post_mean_sc <- scale(df$post_mean)
   df$perturb_beta_sc <- scale(df$perturb_beta)
 
   fit <- tryCatch(lm(post_mean_sc ~ perturb_beta_sc + shet, data = df), error = function(e) NULL)
-  if (is.null(fit)) return(NULL)
-  sm  <- summary(fit)$coefficients
-  if (!"perturb_beta_sc" %in% row.names(sm)) return(NULL)
-  ct  <- tryCatch(cor.test(df$perturb_beta, df$post_mean, method = "pearson"),
-                  error = function(e) list(p.value = NA, estimate = NA, conf.int = c(NA, NA)))
+  if (is.null(fit)) {
+    return(NULL)
+  }
+  sm <- summary(fit)$coefficients
+  if (!"perturb_beta_sc" %in% row.names(sm)) {
+    return(NULL)
+  }
+  ct <- tryCatch(
+    cor.test(df$perturb_beta, df$post_mean, method = "pearson"),
+    error = function(e) list(p.value = NA, estimate = NA, conf.int = c(NA, NA))
+  )
 
   data.frame(
-    ensg                 = target_ensg[i],
-    P_withShet           = sm["perturb_beta_sc", 4],
-    beta_withShet        = sm["perturb_beta_sc", 1],
-    betaSE_withShet      = sm["perturb_beta_sc", 2],
-    P_pearson            = ct$p.value,
-    R_pearson            = ct$estimate,
-    R_pearson_CIlower    = ct$conf.int[1],
-    R_pearson_CIupper    = ct$conf.int[2],
+    ensg = target_ensg[i],
+    P_withShet = sm["perturb_beta_sc", 4],
+    beta_withShet = sm["perturb_beta_sc", 1],
+    betaSE_withShet = sm["perturb_beta_sc", 2],
+    P_pearson = ct$p.value,
+    R_pearson = ct$estimate,
+    R_pearson_CIlower = ct$conf.int[1],
+    R_pearson_CIupper = ct$conf.int[2],
     stringsAsFactors = FALSE
   )
 })
@@ -117,7 +126,7 @@ if (is.null(correlation_df) || nrow(correlation_df) == 0) {
   ))
 }
 
-# ── 合并 posterior + correlation ──
+# Merge posterior effect and regulation evidence.
 correlation_df <- correlation_df[!is.na(correlation_df$ensg) & nzchar(correlation_df$ensg), , drop = FALSE]
 if (nrow(correlation_df) == 0) {
   stop("No scatter rows remained after ENSG resolution")
@@ -182,7 +191,7 @@ ensure_parent_dir(table_path)
 ensure_parent_dir(paste0(plot_prefix, ".pdf"))
 utils::write.table(df, table_path, row.names = FALSE, sep = "\t", quote = FALSE)
 
-# ── 画图 ──
+# Plot.
 library(ggplot2)
 library(ggrepel)
 
@@ -194,9 +203,9 @@ evidence_colors <- c(
 )
 evidence_labels <- c(
   "background" = "Background",
-  "posterior_high" = "High posterior effect",
-  "regulation_supported" = "Concordant regulation FDR <= 0.05",
-  "direction_discordant" = "Discordant regulation FDR <= 0.05"
+  "posterior_high" = "High posterior",
+  "regulation_supported" = "Concordant FDR <= 0.05",
+  "direction_discordant" = "Discordant FDR <= 0.05"
 )
 evidence_shapes <- c(
   "background" = 16,
@@ -210,7 +219,7 @@ subtitle_text <- sprintf(
   "Each point is a gene; y sign follows beta_withShet. FDR is BH-adjusted across plotted genes (n=%s).",
   format(nrow(df), big.mark = ",", scientific = FALSE)
 )
-caption_text <- "Concordant genes have matching posterior and perturb-seq regulation signs; triangles mark significant discordant regulation."
+caption_text <- "Concordant: post_mean and beta_withShet have matching signs. Triangles: significant discordant regulation."
 
 g <- ggplot(df, aes(x = post_mean, y = signed_log10_p))
 g <- g + theme_classic(base_size = 17, base_family = "Helvetica")
@@ -248,8 +257,8 @@ if (nrow(label_df) > 0) {
     show.legend = FALSE
   )
 }
-g <- g + scale_color_manual(values = evidence_colors, labels = evidence_labels, drop = FALSE)
-g <- g + scale_shape_manual(values = evidence_shapes, labels = evidence_labels, drop = FALSE)
+g <- g + scale_color_manual(values = evidence_colors, labels = evidence_labels, drop = TRUE)
+g <- g + scale_shape_manual(values = evidence_shapes, labels = evidence_labels, drop = TRUE)
 g <- g + scale_size_identity()
 g <- g + scale_alpha_identity()
 g <- g + xlab(sprintf("%s posterior effect", trait_label))
@@ -258,17 +267,30 @@ g <- g + labs(
   title = sprintf("Gene-level posterior vs perturb-seq evidence: %s", trait_label),
   subtitle = subtitle_text,
   caption = caption_text,
-  color = "Evidence class",
-  shape = "Evidence class"
+  color = NULL,
+  shape = NULL
 )
 g <- g + coord_cartesian(ylim = c(-y_limit, y_limit))
+g <- g + guides(
+  color = guide_legend(
+    ncol = 2,
+    byrow = TRUE,
+    override.aes = list(size = 3.2, alpha = 1)
+  ),
+  shape = "none"
+)
 g <- g + theme(
-  legend.position = "bottom",
-  legend.title = element_text(face = "bold"),
-  legend.box = "vertical",
+  legend.position = "top",
+  legend.justification = "left",
+  legend.box.just = "left",
+  legend.title = element_blank(),
+  legend.box = "horizontal",
+  legend.margin = margin(0, 0, 4, 0),
+  legend.spacing.x = grid::unit(0.3, "cm"),
   plot.title = element_text(face = "bold"),
   plot.subtitle = element_text(size = 11, color = "grey30"),
   plot.caption = element_text(size = 10, color = "grey35", hjust = 0),
+  plot.margin = margin(12, 18, 14, 18),
   panel.grid.major = element_line(color = "grey92", linewidth = 0.25),
   panel.grid.minor = element_blank()
 )
