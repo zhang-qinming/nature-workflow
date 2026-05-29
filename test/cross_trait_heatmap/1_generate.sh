@@ -57,21 +57,26 @@ safe_name() {
 }
 
 IDS=()
-if [ -z "${CROSS_TRAIT_IDS}" ]; then
-    echo "Set CROSS_TRAIT_IDS=id1,id2,... to generate a cross-trait heatmap." >&2
-    echo "The full file_id_map is intentionally not used by default because it can contain thousands of traits." >&2
-    exit 1
+if [ -n "${CROSS_TRAIT_IDS}" ]; then
+    IFS=',' read -r -a RAW_IDS <<< "${CROSS_TRAIT_IDS}"
+    for raw_id in "${RAW_IDS[@]}"; do
+        raw_id="$(trim "${raw_id}")"
+        [ -z "${raw_id}" ] && continue
+        IDS+=("${raw_id}")
+    done
+else
+    mapfile -t IDS < <(awk -F '\t' 'NR > 1 { sub(/\r$/, "", $2); print $2 }' "${FILE_ID_MAP}")
 fi
-IFS=',' read -r -a RAW_IDS <<< "${CROSS_TRAIT_IDS}"
-for raw_id in "${RAW_IDS[@]}"; do
-    raw_id="$(trim "${raw_id}")"
-    [ -z "${raw_id}" ] && continue
-    IDS+=("${raw_id}")
-done
 
 if [ "${#IDS[@]}" -lt 2 ]; then
     echo "cross_trait_heatmap requires at least two LoF IDs." >&2
     echo "Set CROSS_TRAIT_IDS=id1,id2,... or provide at least two rows in FILE_ID_MAP." >&2
+    exit 1
+fi
+
+if [ "${CROSS_TRAIT_RENDER_PLOT}" != "0" ] && [ "${CROSS_TRAIT_RENDER_PLOT,,}" != "false" ] && [ "${#IDS[@]}" -gt 200 ]; then
+    echo "Refusing to render a static heatmap for ${#IDS[@]} traits." >&2
+    echo "Use CROSS_TRAIT_RENDER_PLOT=0 for frontend TSV output, or set a smaller CROSS_TRAIT_IDS subset." >&2
     exit 1
 fi
 
@@ -132,5 +137,5 @@ echo "Manifest: ${MANIFEST_PATH}"
 echo "Output ID: ${CROSS_TRAIT_OUTPUT_ID}"
 echo "LoF IDs: ${#IDS[@]}"
 echo "Render plot: ${CROSS_TRAIT_RENDER_PLOT}"
-echo "Note: cross_trait_heatmap is group-level; one selected trait set generates one sbatch job."
+echo "Note: cross_trait_heatmap is group-level; the full trait set generates one matrix TSV job for frontend rendering."
 echo "Next: bash test/cross_trait_heatmap/2_submit.sh"
