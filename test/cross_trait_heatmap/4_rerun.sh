@@ -17,8 +17,8 @@ MANIFEST_PATH="${MANIFEST_PATH:-${BATCH_ROOT}/manifest.tsv}"
 
 DRY_RUN="${DRY_RUN:-0}"
 MAX_PENDING="${MAX_PENDING:-100}"
-RERUN_MEM="${RERUN_MEM:-64G}"
-RERUN_CPUS="${RERUN_CPUS:-4}"
+RERUN_MEM="${RERUN_MEM:-4G}"
+RERUN_CPUS="${RERUN_CPUS:-1}"
 INCLUDE_STALE="${INCLUDE_STALE:-1}"
 
 if [ ! -f "${MANIFEST_PATH}" ]; then
@@ -28,13 +28,13 @@ if [ ! -f "${MANIFEST_PATH}" ]; then
 fi
 
 declare -A SCRIPT_BY_ID
-while IFS=$'\t' read -r output_id lof_ids method script_path; do
-    if [ "${output_id}" = "output_id" ]; then
+while IFS=$'\t' read -r lof_id script_path; do
+    if [ "${lof_id}" = "lof_id" ]; then
         continue
     fi
-    output_id="${output_id%$'\r'}"
+    lof_id="${lof_id%$'\r'}"
     script_path="${script_path%$'\r'}"
-    SCRIPT_BY_ID["${output_id}"]="${script_path}"
+    SCRIPT_BY_ID["${lof_id}"]="${script_path}"
 done < "${MANIFEST_PATH}"
 
 FAILED_IDS=()
@@ -68,14 +68,14 @@ pending_count() {
 
 SUBMITTED=0
 
-for output_id in "${FAILED_IDS[@]}"; do
-    script_path="${SCRIPT_BY_ID[${output_id}]:-}"
+for lof_id in "${FAILED_IDS[@]}"; do
+    script_path="${SCRIPT_BY_ID[${lof_id}]:-}"
     if [ -z "${script_path}" ] || [ ! -f "${script_path}" ]; then
-        echo "[SKIP] missing generated script for ${output_id}"
+        echo "[SKIP] missing generated script for ${lof_id}"
         continue
     fi
 
-    rm -f "${STATUS_DIR}/${output_id}.ok" "${STATUS_DIR}/${output_id}.failed" "${STATUS_DIR}/${output_id}.running" "${FAILURE_DIR}/${output_id}.failed"
+    rm -f "${STATUS_DIR}/${lof_id}.ok" "${STATUS_DIR}/${lof_id}.failed" "${STATUS_DIR}/${lof_id}.running" "${FAILURE_DIR}/${lof_id}.failed"
 
     while [ "$(pending_count)" -ge "${MAX_PENDING}" ]; do
         sleep 10
@@ -89,14 +89,14 @@ for output_id in "${FAILED_IDS[@]}"; do
 
     submit_output=""
     if submit_output="$(sbatch --parsable --mem="${RERUN_MEM}" --cpus-per-task="${RERUN_CPUS}" "${script_path}" 2>&1)"; then
-        echo "${submit_output}" > "${STATUS_DIR}/${output_id}.running"
-        echo "[OK] ${output_id} -> Job ${submit_output}"
+        echo "${submit_output}" > "${STATUS_DIR}/${lof_id}.running"
+        echo "[OK] ${lof_id} -> Job ${submit_output}"
         ((SUBMITTED++)) || true
     else
         printf 'time=%s\nreason=submit_failed\nmessage=%s\n' \
-            "$(date -Iseconds)" "${submit_output}" > "${STATUS_DIR}/${output_id}.failed"
-        cp "${STATUS_DIR}/${output_id}.failed" "${FAILURE_DIR}/${output_id}.failed"
-        echo "[FAIL] ${output_id} submit failed"
+            "$(date -Iseconds)" "${submit_output}" > "${STATUS_DIR}/${lof_id}.failed"
+        cp "${STATUS_DIR}/${lof_id}.failed" "${FAILURE_DIR}/${lof_id}.failed"
+        echo "[FAIL] ${lof_id} submit failed"
     fi
 done
 

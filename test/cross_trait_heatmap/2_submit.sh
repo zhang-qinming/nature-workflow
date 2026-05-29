@@ -43,33 +43,45 @@ job_still_active() {
     squeue -j "${job_id}" -h 2>/dev/null | grep -q .
 }
 
+START_ID="${START_ID:-}"
+SKIP=true
+[ -z "${START_ID}" ] && SKIP=false
+
 SUBMITTED=0
 SKIPPED=0
 FAILED_SUBMIT=0
 
-while IFS=$'\t' read -r output_id lof_ids method script_path; do
-    [ "${output_id}" = "output_id" ] && continue
-    output_id="${output_id%$'\r'}"
+while IFS=$'\t' read -r lof_id script_path; do
+    [ "${lof_id}" = "lof_id" ] && continue
+    lof_id="${lof_id%$'\r'}"
     script_path="${script_path%$'\r'}"
 
-    if [ -f "${STATUS_DIR}/${output_id}.ok" ]; then
+    if [ "${SKIP}" = true ]; then
+        if [ "${lof_id}" = "${START_ID}" ]; then
+            SKIP=false
+        else
+            continue
+        fi
+    fi
+
+    if [ -f "${STATUS_DIR}/${lof_id}.ok" ]; then
         ((SKIPPED++)) || true
         continue
     fi
 
-    if [ -f "${STATUS_DIR}/${output_id}.running" ]; then
-        running_job_id="$(tr -d '[:space:]' < "${STATUS_DIR}/${output_id}.running" 2>/dev/null || true)"
+    if [ -f "${STATUS_DIR}/${lof_id}.running" ]; then
+        running_job_id="$(tr -d '[:space:]' < "${STATUS_DIR}/${lof_id}.running" 2>/dev/null || true)"
         if job_still_active "${running_job_id}"; then
             ((SKIPPED++)) || true
             continue
         fi
-        rm -f "${STATUS_DIR}/${output_id}.running"
+        rm -f "${STATUS_DIR}/${lof_id}.running"
     fi
 
     if [ ! -f "${script_path}" ]; then
         printf 'time=%s\nreason=missing_generated_script\nscript_path=%s\n' \
-            "$(date -Iseconds)" "${script_path}" > "${STATUS_DIR}/${output_id}.failed"
-        cp "${STATUS_DIR}/${output_id}.failed" "${FAILURE_DIR}/${output_id}.failed"
+            "$(date -Iseconds)" "${script_path}" > "${STATUS_DIR}/${lof_id}.failed"
+        cp "${STATUS_DIR}/${lof_id}.failed" "${FAILURE_DIR}/${lof_id}.failed"
         ((FAILED_SUBMIT++)) || true
         continue
     fi
@@ -86,15 +98,15 @@ while IFS=$'\t' read -r output_id lof_ids method script_path; do
 
     submit_output=""
     if submit_output="$(sbatch --parsable "${script_path}" 2>&1)"; then
-        echo "${submit_output}" > "${STATUS_DIR}/${output_id}.running"
-        rm -f "${FAILURE_DIR}/${output_id}.failed"
-        echo "[OK] ${output_id} -> Job ${submit_output}"
+        echo "${submit_output}" > "${STATUS_DIR}/${lof_id}.running"
+        rm -f "${FAILURE_DIR}/${lof_id}.failed"
+        echo "[OK] ${lof_id} -> Job ${submit_output}"
         ((SUBMITTED++)) || true
     else
-        echo "[FAIL] ${output_id} submit failed"
+        echo "[FAIL] ${lof_id} submit failed"
         printf 'time=%s\nreason=submit_failed\nmessage=%s\n' \
-            "$(date -Iseconds)" "${submit_output}" > "${STATUS_DIR}/${output_id}.failed"
-        cp "${STATUS_DIR}/${output_id}.failed" "${FAILURE_DIR}/${output_id}.failed"
+            "$(date -Iseconds)" "${submit_output}" > "${STATUS_DIR}/${lof_id}.failed"
+        cp "${STATUS_DIR}/${lof_id}.failed" "${FAILURE_DIR}/${lof_id}.failed"
         ((FAILED_SUBMIT++)) || true
     fi
 done < "${MANIFEST_PATH}"

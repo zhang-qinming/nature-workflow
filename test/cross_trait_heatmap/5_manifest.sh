@@ -3,52 +3,41 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="${PROJECT_ROOT:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
+FILE_ID_MAP="${FILE_ID_MAP:-${PROJECT_ROOT}/configs/path.file_id_map.tsv}"
 
 TASK_NAME="${TASK_NAME:-cross_trait_heatmap}"
 
 OUTPUT_ROOT="${OUTPUT_ROOT:-/gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all/outputs}"
 OUTPUT_DIR="${OUTPUT_DIR:-${OUTPUT_ROOT}/cross_trait_heatmap}"
 RUN_ROOT="${RUN_ROOT:-${OUTPUT_ROOT}/${TASK_NAME}}"
-BATCH_ROOT="${BATCH_ROOT:-/gpfs/chencao/qinminzhang/workflow/catalog_lof/figure_all/scripts/${TASK_NAME}}"
 STATUS_DIR="${STATUS_DIR:-${RUN_ROOT}/status}"
-MANIFEST_PATH="${MANIFEST_PATH:-${BATCH_ROOT}/manifest.tsv}"
 
 TABLES_DIR="${OUTPUT_DIR}/tables"
-PLOTS_DIR="${OUTPUT_DIR}/plots"
 META_DIR="${OUTPUT_DIR}/meta"
 MANIFEST_OUT="${MANIFEST_OUT:-${META_DIR}/manifest_all.tsv}"
 
 mkdir -p "${META_DIR}"
 
-if [ ! -f "${MANIFEST_PATH}" ]; then
-    echo "Manifest not found: ${MANIFEST_PATH}" >&2
-    echo "Run: bash test/cross_trait_heatmap/1_generate.sh" >&2
-    exit 1
-fi
+mapfile -t ALL_IDS < <(awk -F '\t' 'NR > 1 { sub(/\r$/, "", $2); print $2 }' "${FILE_ID_MAP}")
 
 {
-    printf 'figure_id\tfigure_kind\tlof_ids\tmethod\tpairs_path\tmatrix_path\teffects_path\tplot_pdf\tplot_png\tstatus\n'
-    while IFS=$'\t' read -r output_id lof_ids method script_path; do
-        [ "${output_id}" = "output_id" ] && continue
-        output_id="${output_id%$'\r'}"
-        lof_ids="${lof_ids%$'\r'}"
-        method="${method%$'\r'}"
+    printf 'figure_id\tfigure_kind\tsource_id\teffect_path\ttrait_meta_path\tstatus\n'
+    for source_id in "${ALL_IDS[@]}"; do
+        effect_path="${TABLES_DIR}/effects/${source_id}.tsv"
+        trait_meta_path="${META_DIR}/traits/${source_id}.tsv"
         status="missing"
-        [ -f "${STATUS_DIR}/${output_id}.ok" ] && status="ok"
-        [ -f "${STATUS_DIR}/${output_id}.failed" ] && status="failed"
-        [ -f "${STATUS_DIR}/${output_id}.running" ] && [ "${status}" = "missing" ] && status="running"
-        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-            "${output_id}" \
-            "cross_trait_heatmap" \
-            "${lof_ids}" \
-            "${method}" \
-            "${TABLES_DIR}/${output_id}_pairs.tsv" \
-            "${TABLES_DIR}/${output_id}_matrix.tsv" \
-            "${TABLES_DIR}/${output_id}_effects.tsv" \
-            "${PLOTS_DIR}/${output_id}.pdf" \
-            "${PLOTS_DIR}/${output_id}.png" \
+        [ -f "${STATUS_DIR}/${source_id}.ok" ] && status="ok"
+        [ -f "${STATUS_DIR}/${source_id}.failed" ] && status="failed"
+        [ -f "${STATUS_DIR}/${source_id}.running" ] && [ "${status}" = "missing" ] && status="running"
+        printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+            "${source_id}" \
+            "cross_trait_effect_vector" \
+            "${source_id}" \
+            "${effect_path}" \
+            "${trait_meta_path}" \
             "${status}"
-    done < "${MANIFEST_PATH}"
+    done
 } > "${MANIFEST_OUT}"
 
 echo "Manifest written: ${MANIFEST_OUT}"

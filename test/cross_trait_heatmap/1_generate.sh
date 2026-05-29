@@ -21,15 +21,16 @@ GENERATED_DIR="${GENERATED_DIR:-${BATCH_ROOT}/jobs}"
 MANIFEST_PATH="${MANIFEST_PATH:-${BATCH_ROOT}/manifest.tsv}"
 
 WORKER_SCRIPT="${WORKER_SCRIPT:-${SCRIPT_DIR}/run_one.sh}"
-SBATCH_MEM="${SBATCH_MEM:-32G}"
-SBATCH_CPUS="${SBATCH_CPUS:-4}"
+SBATCH_MEM="${SBATCH_MEM:-4G}"
+SBATCH_CPUS="${SBATCH_CPUS:-1}"
 SBATCH_PARTITION="${SBATCH_PARTITION:-cu,fat,batch01,privority}"
-SBATCH_TIME="${SBATCH_TIME:-24:00:00}"
+SBATCH_TIME="${SBATCH_TIME:-6:00:00}"
 
+# Optional comma-separated subset. Default uses all LoF IDs from FILE_ID_MAP.
 CROSS_TRAIT_IDS="${CROSS_TRAIT_IDS:-}"
-CROSS_TRAIT_METHOD="${CROSS_TRAIT_METHOD:-pearson}"
-CROSS_TRAIT_OUTPUT_ID="${CROSS_TRAIT_OUTPUT_ID:-}"
-CROSS_TRAIT_RENDER_PLOT="${CROSS_TRAIT_RENDER_PLOT:-0}"
+POSTERIOR_DIR="${POSTERIOR_DIR:-/gpfs/chencao/qinminzhang/workflow/catalog_lof/run_all/outputs/genebayes/posterior}"
+POSTERIOR_NAME_MAP="${POSTERIOR_NAME_MAP:-}"
+GENE_MAP="${GENE_MAP:-/gpfs/chencao/qinminzhang/Nature/mine/code/data/gencode_v41_gname_gid_ALL_sorted_onlyID}"
 
 mkdir -p "${BATCH_ROOT}" "${GENERATED_DIR}" "${STATUS_DIR}" "${LOGS_DIR}" "${FAILURE_DIR}"
 
@@ -50,12 +51,6 @@ trim() {
     printf '%s' "$value"
 }
 
-safe_name() {
-    local raw="$1"
-    raw="${raw//[^A-Za-z0-9_.-]/_}"
-    printf '%s' "$raw"
-}
-
 IDS=()
 if [ -n "${CROSS_TRAIT_IDS}" ]; then
     IFS=',' read -r -a RAW_IDS <<< "${CROSS_TRAIT_IDS}"
@@ -68,36 +63,22 @@ else
     mapfile -t IDS < <(awk -F '\t' 'NR > 1 { sub(/\r$/, "", $2); print $2 }' "${FILE_ID_MAP}")
 fi
 
-if [ "${#IDS[@]}" -lt 2 ]; then
-    echo "cross_trait_heatmap requires at least two LoF IDs." >&2
-    echo "Set CROSS_TRAIT_IDS=id1,id2,... or provide at least two rows in FILE_ID_MAP." >&2
+if [ "${#IDS[@]}" -eq 0 ]; then
+    echo "No LoF IDs found in ${FILE_ID_MAP}" >&2
     exit 1
 fi
-
-if [ "${CROSS_TRAIT_RENDER_PLOT}" != "0" ] && [ "${CROSS_TRAIT_RENDER_PLOT,,}" != "false" ] && [ "${#IDS[@]}" -gt 200 ]; then
-    echo "Refusing to render a static heatmap for ${#IDS[@]} traits." >&2
-    echo "Use CROSS_TRAIT_RENDER_PLOT=0 for frontend TSV output, or set a smaller CROSS_TRAIT_IDS subset." >&2
-    exit 1
-fi
-
-if [ -z "${CROSS_TRAIT_OUTPUT_ID}" ]; then
-    first_id="${IDS[0]}"
-    last_id="${IDS[$((${#IDS[@]} - 1))]}"
-    CROSS_TRAIT_OUTPUT_ID="$(safe_name "cross_trait_heatmap_n${#IDS[@]}__${first_id}__${last_id}")"
-else
-    CROSS_TRAIT_OUTPUT_ID="$(safe_name "${CROSS_TRAIT_OUTPUT_ID}")"
-fi
-
-LOF_IDS_CSV="$(IFS=','; printf '%s' "${IDS[*]}")"
-script_path="${GENERATED_DIR}/${CROSS_TRAIT_OUTPUT_ID}.sbatch"
 
 rm -f "${GENERATED_DIR}"/*.sbatch
 
-cat > "${script_path}" <<EOF
+{
+    printf 'lof_id\tscript_path\n'
+    for lof_id in "${IDS[@]}"; do
+        script_path="${GENERATED_DIR}/${lof_id}.sbatch"
+        cat > "${script_path}" <<EOF
 #!/usr/bin/env bash
 #SBATCH --job-name=${JOB_NAME}
-#SBATCH --output=${LOGS_DIR}/${CROSS_TRAIT_OUTPUT_ID}_%j.out
-#SBATCH --error=${LOGS_DIR}/${CROSS_TRAIT_OUTPUT_ID}_%j.err
+#SBATCH --output=${LOGS_DIR}/${lof_id}_%j.out
+#SBATCH --error=${LOGS_DIR}/${lof_id}_%j.err
 #SBATCH --mem=${SBATCH_MEM}
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -108,8 +89,7 @@ cat > "${script_path}" <<EOF
 
 set -euo pipefail
 
-export OUTPUT_ID=${CROSS_TRAIT_OUTPUT_ID}
-export LOF_IDS=${LOF_IDS_CSV}
+export LOF_ID=${lof_id}
 export PROJECT_ROOT=${PROJECT_ROOT}
 export FILE_ID_MAP=${FILE_ID_MAP}
 export TASK_NAME=${TASK_NAME}
@@ -120,22 +100,19 @@ export RUN_ROOT=${RUN_ROOT}
 export STATUS_DIR=${STATUS_DIR}
 export LOGS_DIR=${LOGS_DIR}
 export FAILURE_DIR=${FAILURE_DIR}
-export CROSS_TRAIT_METHOD=${CROSS_TRAIT_METHOD}
-export CROSS_TRAIT_RENDER_PLOT=${CROSS_TRAIT_RENDER_PLOT}
+export POSTERIOR_DIR=${POSTERIOR_DIR}
+export POSTERIOR_NAME_MAP=${POSTERIOR_NAME_MAP}
+export GENE_MAP=${GENE_MAP}
 
 bash ${WORKER_SCRIPT}
 EOF
-chmod +x "${script_path}"
-
-{
-    printf 'output_id\tlof_ids\tmethod\tscript_path\n'
-    printf '%s\t%s\t%s\t%s\n' "${CROSS_TRAIT_OUTPUT_ID}" "${LOF_IDS_CSV}" "${CROSS_TRAIT_METHOD}" "${script_path}"
+        chmod +x "${script_path}"
+        printf '%s\t%s\n' "${lof_id}" "${script_path}"
+    done
 } > "${MANIFEST_PATH}"
 
-echo "Generated cross-trait heatmap sbatch script: ${script_path}"
+echo "Generated ${#IDS[@]} cross-trait frontend effect-vector sbatch scripts under: ${GENERATED_DIR}"
 echo "Manifest: ${MANIFEST_PATH}"
-echo "Output ID: ${CROSS_TRAIT_OUTPUT_ID}"
-echo "LoF IDs: ${#IDS[@]}"
-echo "Render plot: ${CROSS_TRAIT_RENDER_PLOT}"
-echo "Note: cross_trait_heatmap is group-level; the full trait set generates one matrix TSV job for frontend rendering."
+echo "Job name: ${JOB_NAME}"
+echo "Each job writes one trait effect TSV for frontend heatmap/scatter rendering."
 echo "Next: bash test/cross_trait_heatmap/2_submit.sh"
