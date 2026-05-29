@@ -19,7 +19,7 @@ ensure_parent_dir <- function(path) {
   dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
 }
 
-posterior_list <- list()
+posterior_list <- vector("list", nrow(targets))
 for (i in seq_len(nrow(targets))) {
   trait_id <- as.character(targets$trait_id[i])
   posterior_path <- as.character(targets$posterior_path[i])
@@ -30,7 +30,7 @@ for (i in seq_len(nrow(targets))) {
     stop(sprintf("Posterior file %s is missing columns: %s", posterior_path, paste(missing_post, collapse = ", ")))
   }
   colnames(df)[colnames(df) == "post_mean"] <- trait_id
-  posterior_list[[trait_id]] <- df[, c("ensg", trait_id)]
+  posterior_list[[i]] <- data.table::as.data.table(df[, c("ensg", trait_id)])
 }
 
 merged_df <- posterior_list[[1]]
@@ -41,33 +41,24 @@ if (length(posterior_list) > 1) {
 }
 
 trait_ids <- as.character(targets$trait_id)
-cor_mat <- matrix(NA_real_, nrow = length(trait_ids), ncol = length(trait_ids), dimnames = list(trait_ids, trait_ids))
-pairwise_df <- data.frame()
+effect_mat <- as.matrix(merged_df[, trait_ids, with = FALSE])
+storage.mode(effect_mat) <- "double"
+cor_mat <- suppressWarnings(stats::cor(effect_mat, method = method, use = "pairwise.complete.obs"))
+complete_mat <- !is.na(effect_mat)
+n_genes_mat <- crossprod(complete_mat)
 
-for (i in seq_along(trait_ids)) {
-  for (j in seq_along(trait_ids)) {
-    x <- merged_df[[trait_ids[i]]]
-    y <- merged_df[[trait_ids[j]]]
-    cor_val <- suppressWarnings(stats::cor(x, y, method = method, use = "pairwise.complete.obs"))
-    cor_mat[i, j] <- cor_val
-    if (j >= i) {
-      pairwise_df <- rbind(
-        pairwise_df,
-        data.frame(
-          trait_x = trait_ids[i],
-          trait_y = trait_ids[j],
-          correlation = cor_val,
-          n_genes = sum(stats::complete.cases(x, y)),
-          method = method,
-          stringsAsFactors = FALSE
-        )
-      )
-    }
-  }
-}
+upper_idx <- which(upper.tri(cor_mat, diag = TRUE), arr.ind = TRUE)
+pairwise_df <- data.frame(
+  trait_x = rownames(cor_mat)[upper_idx[, 1]],
+  trait_y = colnames(cor_mat)[upper_idx[, 2]],
+  correlation = cor_mat[upper_idx],
+  n_genes = as.integer(n_genes_mat[upper_idx]),
+  method = method,
+  stringsAsFactors = FALSE
+)
 
 matrix_df <- data.frame(trait_id = rownames(cor_mat), cor_mat, check.names = FALSE, stringsAsFactors = FALSE)
-effect_matrix_df <- merged_df[, c("ensg", trait_ids), drop = FALSE]
+effect_matrix_df <- as.data.frame(merged_df[, c("ensg", trait_ids), with = FALSE])
 
 ensure_parent_dir(paste0(table_prefix, "_matrix.tsv"))
 utils::write.table(pairwise_df, paste0(table_prefix, "_pairs.tsv"), row.names = FALSE, sep = "\t", quote = FALSE)
@@ -80,21 +71,17 @@ if (!plot_enabled) {
 
 ensure_parent_dir(paste0(plot_prefix, ".pdf"))
 
-plot_df <- data.frame()
-for (i in seq_along(trait_ids)) {
-  for (j in seq_along(trait_ids)) {
-    plot_df <- rbind(
-      plot_df,
-      data.frame(
-        trait_x = trait_ids[i],
-        trait_y = trait_ids[j],
-        correlation = cor_mat[i, j],
-        stringsAsFactors = FALSE
-      )
-    )
-  }
-}
-dist_mat <- stats::as.dist(1 - cor_mat)
+plot_df <- expand.grid(
+  trait_x = rownames(cor_mat),
+  trait_y = colnames(cor_mat),
+  KEEP.OUT.ATTRS = FALSE,
+  stringsAsFactors = FALSE
+)
+plot_df$correlation <- as.vector(cor_mat)
+cor_for_dist <- cor_mat
+cor_for_dist[is.na(cor_for_dist)] <- 0
+diag(cor_for_dist) <- 1
+dist_mat <- stats::as.dist(1 - cor_for_dist)
 hc <- stats::hclust(dist_mat, method = "complete")
 ordered_traits <- trait_ids[hc$order]
 
