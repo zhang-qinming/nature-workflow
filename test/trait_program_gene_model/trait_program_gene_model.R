@@ -92,6 +92,22 @@ empty_prediction_table <- function() {
   )
 }
 
+empty_regulator_effect_table <- function() {
+  data.frame(
+    gene = character(),
+    ensg = character(),
+    Program = character(),
+    beta = numeric(),
+    p = numeric(),
+    fdr = numeric(),
+    weighted_effect_program = numeric(),
+    weighted_effect = numeric(),
+    support_count = integer(),
+    membership_score = numeric(),
+    stringsAsFactors = FALSE
+  )
+}
+
 read_gene_map <- function(path) {
   gene_map <- utils::read.table(path, header = FALSE, stringsAsFactors = FALSE)
   if (ncol(gene_map) < 2) {
@@ -142,8 +158,12 @@ read_regulation_matrices <- function(regulation_dir, k, gene_map) {
     if (ncol(tmp) < 3) {
       stop(sprintf("regulation file must have at least three columns: %s", path))
     }
-    tmp_beta <- tmp[, 1:2]
-    tmp_p <- tmp[, c(1, 3)]
+    colnames(tmp)[1:3] <- c("gene", "beta", "p")
+    tmp <- tmp[, c("gene", "beta", "p"), drop = FALSE]
+    tmp$gene <- trimws(as.character(tmp$gene))
+    tmp <- tmp[nzchar(tmp$gene) & !duplicated(tmp$gene), , drop = FALSE]
+    tmp_beta <- tmp[, c("gene", "beta"), drop = FALSE]
+    tmp_p <- tmp[, c("gene", "p"), drop = FALSE]
     colnames(tmp_beta) <- c("gene", paste0("P", i))
     colnames(tmp_p) <- c("gene", paste0("P", i))
     if (i == 1) {
@@ -157,6 +177,8 @@ read_regulation_matrices <- function(regulation_dir, k, gene_map) {
 
   beta_df$ensg <- unname(ensg_lookup[as.character(beta_df$gene)])
   p_df$ensg <- unname(ensg_lookup[as.character(p_df$gene)])
+  beta_df <- beta_df[!is.na(beta_df$ensg) & nzchar(beta_df$ensg), , drop = FALSE]
+  p_df <- p_df[!is.na(p_df$ensg) & nzchar(p_df$ensg), , drop = FALSE]
   list(beta = beta_df, p = p_df)
 }
 
@@ -220,6 +242,16 @@ rank_program_burden <- function(posterior_df, spectra, shet_df, top_n, random_it
       stringsAsFactors = FALSE
     )
   }
+  if (length(rows) == 0) {
+    return(data.frame(
+      Program = character(),
+      P = numeric(),
+      meanG = numeric(),
+      MEANgamma_top = numeric(),
+      shet_adjusted_random_mean = numeric(),
+      stringsAsFactors = FALSE
+    ))
+  }
   out <- do.call(rbind, rows)
   out <- out[order(abs(out$meanG), decreasing = TRUE), , drop = FALSE]
   out <- out[order(out$P), , drop = FALSE]
@@ -227,7 +259,7 @@ rank_program_burden <- function(posterior_df, spectra, shet_df, top_n, random_it
 }
 
 select_regulator_model <- function(posterior_df, beta_df, shet_df, regulator_n) {
-  model_df <- merge(posterior_df[, c("gene", "ensg", "post_mean"), drop = FALSE], beta_df, by = "gene", all = FALSE)
+  model_df <- merge(posterior_df[, c("gene", "ensg", "post_mean"), drop = FALSE], beta_df, by = c("gene", "ensg"), all = FALSE)
   model_df <- merge(model_df, shet_df[, c("ensg", "shet"), drop = FALSE], by = "ensg", all = FALSE)
   program_cols <- grep("^P[0-9]+$", names(model_df), value = TRUE)
   model_df <- model_df[, c("post_mean", program_cols, "shet"), drop = FALSE]
@@ -337,18 +369,22 @@ build_gene_predictions <- function(
 
   beta_long <- data.frame()
   p_long <- data.frame()
-  for (program in regulator_selected) {
-    beta_long <- rbind(beta_long, data.frame(gene = beta_df$gene, ensg = beta_df$ensg, Program = program, beta = beta_df[[program]]))
-    p_long <- rbind(p_long, data.frame(gene = p_df$gene, ensg = p_df$ensg, Program = program, p = p_df[[program]]))
+  if (length(regulator_selected) > 0) {
+    for (program in regulator_selected) {
+      beta_long <- rbind(beta_long, data.frame(gene = beta_df$gene, ensg = beta_df$ensg, Program = program, beta = beta_df[[program]]))
+      p_long <- rbind(p_long, data.frame(gene = p_df$gene, ensg = p_df$ensg, Program = program, p = p_df[[program]]))
+    }
+    reg_long <- merge(beta_long, p_long, by = c("gene", "ensg", "Program"), all = FALSE)
+  } else {
+    reg_long <- data.frame(gene = character(), ensg = character(), Program = character(), beta = numeric(), p = numeric())
   }
-  reg_long <- merge(beta_long, p_long, by = c("gene", "ensg", "Program"), all = FALSE)
   if (nrow(reg_long) > 0) {
     reg_long$fdr <- ave(reg_long$p, reg_long$Program, FUN = function(x) stats::p.adjust(x, method = "BH"))
     reg_long <- reg_long[reg_long$fdr <= regulator_fdr_threshold, , drop = FALSE]
     reg_long$weighted_effect <- unname(coef_lookup[reg_long$Program]) * reg_long$beta
   }
 
-  regulator_gene_effect <- data.frame()
+  regulator_gene_effect <- empty_regulator_effect_table()
   if (nrow(reg_long) > 0) {
     total_effect <- aggregate(
       weighted_effect ~ gene + ensg,
@@ -428,6 +464,9 @@ run_model <- function(posterior_df, do_permutation = FALSE, seed = NA_integer_) 
     df$post_mean <- sample(df$post_mean, nrow(df), replace = FALSE)
   }
   program_rank <- rank_program_burden(df, spectra, shet_df, loading_top_n, random_iterations)
+  if (nrow(program_rank) == 0) {
+    stop("No program-burden rankings were produced; check posterior, spectra, gene map, and shet overlap")
+  }
   program_selected <- head(program_rank$Program, program_n)
   reg_model <- select_regulator_model(df, reg_mats$beta, shet_df, regulator_n)
   predictions <- build_gene_predictions(
@@ -468,6 +507,7 @@ posterior_df$gene[is.na(posterior_df$gene) | !nzchar(posterior_df$gene)] <- post
   is.na(posterior_df$gene) | !nzchar(posterior_df$gene)
 ]
 posterior_df <- posterior_df[!is.na(posterior_df$post_mean), c("ensg", "gene", "post_mean"), drop = FALSE]
+posterior_df <- posterior_df[nzchar(posterior_df$gene) & !duplicated(posterior_df$gene), , drop = FALSE]
 
 shet_df <- utils::read.table(shet_path, header = TRUE, stringsAsFactors = FALSE)
 shet_df$ensg <- normalize_ensg_ids(shet_df$ensg)
