@@ -17,8 +17,9 @@ MANIFEST_PATH="${MANIFEST_PATH:-${BATCH_ROOT}/manifest.tsv}"
 
 DRY_RUN="${DRY_RUN:-0}"
 MAX_PENDING="${MAX_PENDING:-100}"
-RERUN_MEM="${RERUN_MEM:-4500M}"
+RERUN_MEM="${RERUN_MEM:-4G}"
 RERUN_CPUS="${RERUN_CPUS:-1}"
+RERUN_PARTITION="${RERUN_PARTITION:-cu,fat,batch01,privority,gpu,A800}"
 INCLUDE_STALE="${INCLUDE_STALE:-1}"
 
 if [ ! -f "${MANIFEST_PATH}" ]; then
@@ -80,13 +81,13 @@ for lof_id in "${FAILED_IDS[@]}"; do
     done
 
     if [ "${DRY_RUN}" = "1" ]; then
-        echo "[DRY RUN] sbatch --mem=${RERUN_MEM} --cpus-per-task=${RERUN_CPUS} ${script_path}"
+        echo "[DRY RUN] sbatch --mem=${RERUN_MEM} --cpus-per-task=${RERUN_CPUS} --partition=${RERUN_PARTITION} ${script_path}"
         ((SUBMITTED++)) || true
         continue
     fi
 
     submit_output=""
-    if submit_output="$(sbatch --parsable --mem="${RERUN_MEM}" --cpus-per-task="${RERUN_CPUS}" "${script_path}" 2>&1)"; then
+    if submit_output="$(sbatch --parsable --mem="${RERUN_MEM}" --cpus-per-task="${RERUN_CPUS}" --partition="${RERUN_PARTITION}" "${script_path}" 2>&1)"; then
         echo "${submit_output}" > "${STATUS_DIR}/${lof_id}.running"
         echo "[OK] ${lof_id} -> Job ${submit_output}"
         ((SUBMITTED++)) || true
