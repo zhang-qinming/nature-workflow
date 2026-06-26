@@ -4,6 +4,13 @@ This directory runs a paper-style Trait-Program-Gene model workflow for each LoF
 
 Inputs are intentionally scattered across existing pipeline outputs and reference folders. Outputs are written only under `OUTPUT_DIR`; the input folders are not modified.
 
+By default this version uses trait-specific automatic model selection:
+
+- `TPGM_PROGRAM_N=auto`: select cNMF programs whose shet-matched burden enrichment passes BH-FDR `TPGM_PROGRAM_FDR_THRESHOLD` (default `0.05`).
+- `TPGM_REGULATOR_N=auto`: use `leaps::regsubsets` and BIC to choose the regulator model size, then remove the `shet` covariate and keep the selected cNMF programs. The search is capped by `TPGM_REGULATOR_MAX_N` (default `8`) for runtime and interpretability.
+
+Set `TPGM_PROGRAM_N` or `TPGM_REGULATOR_N` to an integer to force a fixed number. The sibling directory `trait_program_gene_model_5program_3regulator` keeps the fixed 5+3 wrapper.
+
 ## Required Inputs
 
 - `FILE_ID_MAP`: TSV with `id1`, `id2`, `path1`, `path2`. The workflow iterates over `id2`.
@@ -28,7 +35,7 @@ The workflow writes:
 - `tables/{trait}_long.tsv`: concordant graph genes, similar to the current panel long table.
 - `tables/{trait}_programs.tsv`: selected programs, similar to the current panel program table.
 - `tables/{trait}_gene_predictions.tsv`: all tested graph genes before concordant filtering.
-- `tables/{trait}_program_rank.tsv`: program-burden ranking.
+- `tables/{trait}_program_rank.tsv`: program-burden ranking, including raw `P` and BH-FDR `q_value`.
 - `tables/{trait}_regulator_coefficients.tsv`: regulator model coefficients.
 - `tables/{trait}_permutation.tsv`: permutation summary when `TPGM_PERMUTATION_ITERATIONS > 0`.
 - `plots/{trait}.pdf` and `plots/{trait}.png`.

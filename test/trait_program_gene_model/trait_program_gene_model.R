@@ -4,7 +4,8 @@ if (length(args) < 14) {
     "usage: trait_program_gene_model.R <regulation_dir> <spectra_path> <gene_map_path>",
     "<posterior_path> <trait_id> <k> <table_prefix> <plot_prefix> <shet_path>",
     "<program_n> <regulator_n> <loading_top_n> <hit_abs_gamma_threshold>",
-    "<regulator_fdr_threshold> [random_iterations] [permutation_iterations] [max_genes_per_side] [render_plot]"
+    "<regulator_fdr_threshold> [random_iterations] [permutation_iterations] [max_genes_per_side] [render_plot]",
+    "[program_fdr_threshold] [regulator_max_n]"
   ))
 }
 
@@ -17,8 +18,8 @@ k <- as.integer(args[6])
 table_prefix <- as.character(args[7])
 plot_prefix <- as.character(args[8])
 shet_path <- as.character(args[9])
-program_n <- as.integer(args[10])
-regulator_n <- as.integer(args[11])
+program_n_arg <- as.character(args[10])
+regulator_n_arg <- as.character(args[11])
 loading_top_n <- as.integer(args[12])
 hit_abs_gamma_threshold <- as.numeric(args[13])
 regulator_fdr_threshold <- as.numeric(args[14])
@@ -26,9 +27,32 @@ random_iterations <- if (length(args) >= 15) as.integer(args[15]) else 10000L
 permutation_iterations <- if (length(args) >= 16) as.integer(args[16]) else 0L
 max_genes_per_side <- if (length(args) >= 17) as.integer(args[17]) else 8L
 render_plot <- if (length(args) >= 18) as.character(args[18]) else "1"
+program_fdr_threshold <- if (length(args) >= 19) as.numeric(args[19]) else 0.05
+regulator_max_n <- if (length(args) >= 20) as.integer(args[20]) else 8L
 plot_enabled <- render_plot %in% c("1", "true", "TRUE", "yes", "YES")
 
 options(scipen = 10)
+
+parse_selection_count <- function(value, name) {
+  value <- trimws(as.character(value))
+  if (tolower(value) %in% c("auto", "automatic", "model", "bic")) {
+    return(list(mode = "auto", n = NA_integer_))
+  }
+  n <- suppressWarnings(as.integer(value))
+  if (is.na(n) || n < 0) {
+    stop(sprintf("%s must be a non-negative integer or auto: %s", name, value))
+  }
+  list(mode = "fixed", n = n)
+}
+
+program_selection <- parse_selection_count(program_n_arg, "program_n")
+regulator_selection <- parse_selection_count(regulator_n_arg, "regulator_n")
+if (is.na(program_fdr_threshold) || program_fdr_threshold < 0 || program_fdr_threshold > 1) {
+  stop(sprintf("program_fdr_threshold must be in [0, 1]: %s", program_fdr_threshold))
+}
+if (is.na(regulator_max_n) || regulator_max_n < 0) {
+  stop(sprintf("regulator_max_n must be a non-negative integer: %s", regulator_max_n))
+}
 
 ensure_parent_dir <- function(path) {
   dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
@@ -235,7 +259,7 @@ rank_program_burden <- function(posterior_df, spectra, shet_df, top_n, random_it
     p2 <- ((length(random_means) + 2 - rank_value) / length(random_means)) * 2
     rows[[length(rows) + 1]] <- data.frame(
       Program = program,
-      P = min(p1, p2),
+      P = min(1, min(p1, p2)),
       meanG = mean_gamma_top - mean(random_means),
       MEANgamma_top = mean_gamma_top,
       shet_adjusted_random_mean = mean(random_means),
@@ -246,6 +270,7 @@ rank_program_burden <- function(posterior_df, spectra, shet_df, top_n, random_it
     return(data.frame(
       Program = character(),
       P = numeric(),
+      q_value = numeric(),
       meanG = numeric(),
       MEANgamma_top = numeric(),
       shet_adjusted_random_mean = numeric(),
@@ -253,12 +278,31 @@ rank_program_burden <- function(posterior_df, spectra, shet_df, top_n, random_it
     ))
   }
   out <- do.call(rbind, rows)
+  out$q_value <- stats::p.adjust(out$P, method = "BH")
   out <- out[order(abs(out$meanG), decreasing = TRUE), , drop = FALSE]
-  out <- out[order(out$P), , drop = FALSE]
+  out <- out[order(out$q_value, out$P), , drop = FALSE]
   out
 }
 
-select_regulator_model <- function(posterior_df, beta_df, shet_df, regulator_n) {
+select_programs <- function(program_rank, program_selection, fdr_threshold) {
+  if (program_selection$mode == "auto") {
+    selected <- program_rank$Program[
+      !is.na(program_rank$q_value) &
+        program_rank$q_value <= fdr_threshold
+    ]
+    return(selected)
+  }
+  head(program_rank$Program, program_selection$n)
+}
+
+extract_regsubsets_programs <- function(fit_summary, row_index) {
+  fit_which <- fit_summary$which
+  selected <- colnames(fit_which)[fit_which[row_index, ]]
+  selected <- selected[!selected %in% c("(Intercept)", "shet")]
+  normalize_program_ids(selected)
+}
+
+select_regulator_model <- function(posterior_df, beta_df, shet_df, regulator_selection, regulator_max_n) {
   model_df <- merge(posterior_df[, c("gene", "ensg", "post_mean"), drop = FALSE], beta_df, by = c("gene", "ensg"), all = FALSE)
   model_df <- merge(model_df, shet_df[, c("ensg", "shet"), drop = FALSE], by = "ensg", all = FALSE)
   program_cols <- grep("^P[0-9]+$", names(model_df), value = TRUE)
@@ -271,30 +315,46 @@ select_regulator_model <- function(posterior_df, beta_df, shet_df, regulator_n) 
   }
 
   suppressPackageStartupMessages(library(leaps))
-  fit <- leaps::regsubsets(
-    post_mean ~ .,
-    data = model_df,
-    nbest = 1,
-    nvmax = regulator_n + 1,
-    really.big = TRUE
-  )
-  fit_sum <- summary(fit)[[1]]
-  selected <- colnames(fit_sum)[fit_sum[nrow(fit_sum), ]]
-  selected <- selected[!selected %in% c("(Intercept)", "shet")]
-  selected <- normalize_program_ids(selected)
-
-  if (length(selected) != regulator_n) {
+  predictor_n <- length(program_cols) + 1L
+  if (regulator_selection$mode == "auto") {
+    nvmax <- min(max(1L, regulator_max_n + 1L), predictor_n)
     fit <- leaps::regsubsets(
       post_mean ~ .,
       data = model_df,
       nbest = 1,
-      nvmax = regulator_n,
+      nvmax = nvmax,
       really.big = TRUE
     )
-    fit_sum <- summary(fit)[[1]]
-    selected <- colnames(fit_sum)[fit_sum[nrow(fit_sum), ]]
-    selected <- selected[!selected %in% c("(Intercept)", "shet")]
-    selected <- normalize_program_ids(selected)
+    fit_summary <- summary(fit)
+    best_row <- which.min(fit_summary$bic)
+    selected <- extract_regsubsets_programs(fit_summary, best_row)
+  } else {
+    regulator_n <- regulator_selection$n
+    if (regulator_n == 0) {
+      selected <- character()
+    } else {
+      fit <- leaps::regsubsets(
+        post_mean ~ .,
+        data = model_df,
+        nbest = 1,
+        nvmax = min(regulator_n + 1L, predictor_n),
+        really.big = TRUE
+      )
+      fit_summary <- summary(fit)
+      selected <- extract_regsubsets_programs(fit_summary, nrow(fit_summary$which))
+
+      if (length(selected) != regulator_n) {
+        fit <- leaps::regsubsets(
+          post_mean ~ .,
+          data = model_df,
+          nbest = 1,
+          nvmax = min(regulator_n, predictor_n),
+          really.big = TRUE
+        )
+        fit_summary <- summary(fit)
+        selected <- extract_regsubsets_programs(fit_summary, nrow(fit_summary$which))
+      }
+    }
   }
 
   lm_df <- model_df[, c("post_mean", selected, "shet"), drop = FALSE]
@@ -308,7 +368,7 @@ select_regulator_model <- function(posterior_df, beta_df, shet_df, regulator_n) 
   coef_df <- coef_df[coef_df$term %in% selected, c("term", "estimate", "std_error", "t_value", "p_value"), drop = FALSE]
   colnames(coef_df)[1] <- "Program"
 
-  list(selected = selected, coefficients = coef_df)
+  return(list(selected = selected, coefficients = coef_df))
 }
 
 top_loading_membership <- function(spectra, selected_programs, top_n) {
@@ -467,8 +527,8 @@ run_model <- function(posterior_df, do_permutation = FALSE, seed = NA_integer_) 
   if (nrow(program_rank) == 0) {
     stop("No program-burden rankings were produced; check posterior, spectra, gene map, and shet overlap")
   }
-  program_selected <- head(program_rank$Program, program_n)
-  reg_model <- select_regulator_model(df, reg_mats$beta, shet_df, regulator_n)
+  program_selected <- select_programs(program_rank, program_selection, program_fdr_threshold)
+  reg_model <- select_regulator_model(df, reg_mats$beta, shet_df, regulator_selection, regulator_max_n)
   predictions <- build_gene_predictions(
     posterior_df = df,
     spectra = spectra,
@@ -526,21 +586,38 @@ program_rows$selected_by_program <- program_rows$Program %in% model$program_sele
 program_rows$selected_by_regulator <- program_rows$Program %in% model$regulator_selected
 program_rows$trait_id <- trait_id
 program_rows$program_trait_sign <- sign_to_label(program_rows$meanG)
+program_rows$program_selection_mode <- program_selection$mode
+program_rows$program_fdr_threshold <- ifelse(program_selection$mode == "auto", program_fdr_threshold, NA_real_)
+program_rows$regulator_selection_mode <- regulator_selection$mode
+program_rows$regulator_max_n <- ifelse(regulator_selection$mode == "auto", regulator_max_n, NA_integer_)
 
 coef_rows <- model$regulator_coefficients
-coef_rows$trait_id <- trait_id
-coef_rows$selected_by_regulator <- TRUE
+coef_rows$trait_id <- rep(trait_id, nrow(coef_rows))
+coef_rows$selected_by_regulator <- rep(TRUE, nrow(coef_rows))
+coef_rows$regulator_selection_mode <- rep(regulator_selection$mode, nrow(coef_rows))
+coef_rows$regulator_max_n <- rep(ifelse(regulator_selection$mode == "auto", regulator_max_n, NA_integer_), nrow(coef_rows))
 
-selected_rows <- data.frame(
-  trait_id = trait_id,
-  Program = unique(c(model$program_selected, model$regulator_selected)),
-  selected_by_program = unique(c(model$program_selected, model$regulator_selected)) %in% model$program_selected,
-  selected_by_regulator = unique(c(model$program_selected, model$regulator_selected)) %in% model$regulator_selected,
-  stringsAsFactors = FALSE
-)
+selected_program_ids <- unique(c(model$program_selected, model$regulator_selected))
+if (length(selected_program_ids) > 0) {
+  selected_rows <- data.frame(
+    trait_id = trait_id,
+    Program = selected_program_ids,
+    selected_by_program = selected_program_ids %in% model$program_selected,
+    selected_by_regulator = selected_program_ids %in% model$regulator_selected,
+    stringsAsFactors = FALSE
+  )
+} else {
+  selected_rows <- data.frame(
+    trait_id = character(),
+    Program = character(),
+    selected_by_program = logical(),
+    selected_by_regulator = logical(),
+    stringsAsFactors = FALSE
+  )
+}
 selected_rows <- merge(
   selected_rows,
-  program_rows[, c("Program", "P", "meanG", "MEANgamma_top", "shet_adjusted_random_mean", "program_trait_sign")],
+  program_rows[, c("Program", "P", "q_value", "meanG", "MEANgamma_top", "shet_adjusted_random_mean", "program_trait_sign")],
   by = "Program",
   all.x = TRUE
 )
@@ -552,8 +629,12 @@ selected_rows <- merge(
 )
 colnames(selected_rows)[colnames(selected_rows) == "estimate"] <- "regulator_model_coef"
 colnames(selected_rows)[colnames(selected_rows) == "p_value"] <- "regulator_model_p"
-selected_rows$loading_gene_count <- 0L
-selected_rows$regulator_gene_count <- 0L
+selected_rows$program_selection_mode <- rep(program_selection$mode, nrow(selected_rows))
+selected_rows$program_fdr_threshold <- rep(ifelse(program_selection$mode == "auto", program_fdr_threshold, NA_real_), nrow(selected_rows))
+selected_rows$regulator_selection_mode <- rep(regulator_selection$mode, nrow(selected_rows))
+selected_rows$regulator_max_n <- rep(ifelse(regulator_selection$mode == "auto", regulator_max_n, NA_integer_), nrow(selected_rows))
+selected_rows$loading_gene_count <- integer(nrow(selected_rows))
+selected_rows$regulator_gene_count <- integer(nrow(selected_rows))
 
 predictions <- model$predictions
 graph_long <- predictions[predictions$is_concordant, , drop = FALSE]
@@ -571,7 +652,7 @@ selected_rows$program_label <- sprintf(
   selected_rows$loading_gene_count,
   selected_rows$regulator_gene_count
 )
-selected_rows$has_overlap <- nrow(graph_long) > 0
+selected_rows$has_overlap <- rep(nrow(graph_long) > 0, nrow(selected_rows))
 selected_rows$empty_reason <- ifelse(selected_rows$has_overlap, "", "no_concordant_trait_program_gene_overlap")
 
 permutation_rows <- data.frame()
