@@ -25,7 +25,7 @@ hit_abs_gamma_threshold <- as.numeric(args[13])
 regulator_fdr_threshold <- as.numeric(args[14])
 random_iterations <- if (length(args) >= 15) as.integer(args[15]) else 10000L
 permutation_iterations <- if (length(args) >= 16) as.integer(args[16]) else 0L
-max_genes_per_side <- if (length(args) >= 17) as.integer(args[17]) else 8L
+max_genes_per_side_arg <- if (length(args) >= 17) as.character(args[17]) else "all"
 render_plot <- if (length(args) >= 18) as.character(args[18]) else "1"
 program_fdr_threshold <- if (length(args) >= 19) as.numeric(args[19]) else 0.05
 regulator_max_n <- if (length(args) >= 20) as.integer(args[20]) else 8L
@@ -45,8 +45,21 @@ parse_selection_count <- function(value, name) {
   list(mode = "fixed", n = n)
 }
 
+parse_gene_limit <- function(value) {
+  value <- trimws(as.character(value))
+  if (tolower(value) %in% c("all", "none", "no_limit", "unlimited", "inf", "infinite")) {
+    return(Inf)
+  }
+  n <- suppressWarnings(as.integer(value))
+  if (is.na(n) || n < 1) {
+    stop(sprintf("max_genes_per_side must be a positive integer or all: %s", value))
+  }
+  n
+}
+
 program_selection <- parse_selection_count(program_n_arg, "program_n")
 regulator_selection <- parse_selection_count(regulator_n_arg, "regulator_n")
+max_genes_per_side <- parse_gene_limit(max_genes_per_side_arg)
 if (is.na(program_fdr_threshold) || program_fdr_threshold < 0 || program_fdr_threshold > 1) {
   stop(sprintf("program_fdr_threshold must be in [0, 1]: %s", program_fdr_threshold))
 }
@@ -371,6 +384,13 @@ select_regulator_model <- function(posterior_df, beta_df, shet_df, regulator_sel
   return(list(selected = selected, coefficients = coef_df))
 }
 
+limit_rows_per_side <- function(df, max_genes_per_side) {
+  if (!is.finite(max_genes_per_side)) {
+    return(df)
+  }
+  head(df, max_genes_per_side)
+}
+
 top_loading_membership <- function(spectra, selected_programs, top_n) {
   rows <- list()
   for (program in selected_programs) {
@@ -424,7 +444,7 @@ build_gene_predictions <- function(
     loading_hits$predicted_effect <- unname(program_sign[loading_hits$Program])
     loading_hits$rank_effect <- ave(-abs(loading_hits$post_mean), loading_hits$Program, FUN = rank, ties.method = "first")
     loading_hits <- loading_hits[order(loading_hits$Program, loading_hits$rank_effect, loading_hits$rank_within_side), , drop = FALSE]
-    loading_hits <- do.call(rbind, lapply(split(loading_hits, loading_hits$Program), function(df) head(df, max_genes_per_side)))
+    loading_hits <- do.call(rbind, lapply(split(loading_hits, loading_hits$Program), limit_rows_per_side, max_genes_per_side))
   }
 
   beta_long <- data.frame()
@@ -469,7 +489,7 @@ build_gene_predictions <- function(
     regulator_hits$predicted_effect <- regulator_hits$weighted_effect
     regulator_hits$rank_within_side <- rank(-abs(regulator_hits$weighted_effect), ties.method = "first")
     regulator_hits <- regulator_hits[order(regulator_hits$Program, -abs(regulator_hits$post_mean), regulator_hits$rank_within_side), , drop = FALSE]
-    regulator_hits <- do.call(rbind, lapply(split(regulator_hits, regulator_hits$Program), function(df) head(df, max_genes_per_side)))
+    regulator_hits <- do.call(rbind, lapply(split(regulator_hits, regulator_hits$Program), limit_rows_per_side, max_genes_per_side))
   }
 
   common_cols <- c(
@@ -637,7 +657,8 @@ selected_rows$loading_gene_count <- integer(nrow(selected_rows))
 selected_rows$regulator_gene_count <- integer(nrow(selected_rows))
 
 predictions <- model$predictions
-graph_long <- predictions[predictions$is_concordant, , drop = FALSE]
+concordant_long <- predictions[predictions$is_concordant, , drop = FALSE]
+graph_long <- predictions[predictions$is_concordant | predictions$is_discordant, , drop = FALSE]
 if (nrow(graph_long) > 0) {
   loading_counts <- table(graph_long$Program[graph_long$side == "program_loading"])
   regulator_counts <- table(graph_long$Program[graph_long$side == "regulator"])
@@ -646,6 +667,16 @@ if (nrow(graph_long) > 0) {
   selected_rows$loading_gene_count[is.na(selected_rows$loading_gene_count)] <- 0L
   selected_rows$regulator_gene_count[is.na(selected_rows$regulator_gene_count)] <- 0L
 }
+selected_rows$concordant_gene_count <- integer(nrow(selected_rows))
+selected_rows$discordant_gene_count <- integer(nrow(selected_rows))
+if (nrow(graph_long) > 0) {
+  concordant_counts <- table(graph_long$Program[graph_long$is_concordant])
+  discordant_counts <- table(graph_long$Program[graph_long$is_discordant])
+  selected_rows$concordant_gene_count <- as.integer(concordant_counts[selected_rows$Program])
+  selected_rows$discordant_gene_count <- as.integer(discordant_counts[selected_rows$Program])
+  selected_rows$concordant_gene_count[is.na(selected_rows$concordant_gene_count)] <- 0L
+  selected_rows$discordant_gene_count[is.na(selected_rows$discordant_gene_count)] <- 0L
+}
 selected_rows$program_label <- sprintf(
   "%s  L:%d  R:%d",
   selected_rows$Program,
@@ -653,7 +684,7 @@ selected_rows$program_label <- sprintf(
   selected_rows$regulator_gene_count
 )
 selected_rows$has_overlap <- rep(nrow(graph_long) > 0, nrow(selected_rows))
-selected_rows$empty_reason <- ifelse(selected_rows$has_overlap, "", "no_concordant_trait_program_gene_overlap")
+selected_rows$empty_reason <- ifelse(selected_rows$has_overlap, "", "no_trait_program_gene_overlap")
 
 permutation_rows <- data.frame()
 if (permutation_iterations > 0) {
@@ -679,6 +710,7 @@ if (permutation_iterations > 0) {
 
 ensure_parent_dir(paste0(table_prefix, "_long.tsv"))
 utils::write.table(graph_long, paste0(table_prefix, "_long.tsv"), row.names = FALSE, sep = "\t", quote = FALSE)
+utils::write.table(concordant_long, paste0(table_prefix, "_concordant_long.tsv"), row.names = FALSE, sep = "\t", quote = FALSE)
 utils::write.table(selected_rows, paste0(table_prefix, "_programs.tsv"), row.names = FALSE, sep = "\t", quote = FALSE)
 utils::write.table(predictions, paste0(table_prefix, "_gene_predictions.tsv"), row.names = FALSE, sep = "\t", quote = FALSE)
 utils::write.table(program_rows, paste0(table_prefix, "_program_rank.tsv"), row.names = FALSE, sep = "\t", quote = FALSE)
@@ -701,7 +733,7 @@ if (plot_enabled) {
     suppressPackageStartupMessages(library(ggplot2))
     plot_df$Program <- factor(plot_df$Program, levels = unique(selected_rows$Program))
     plot_df$side <- factor(plot_df$side, levels = c("program_loading", "regulator"))
-    g <- ggplot(plot_df, aes(x = side, y = reorder(gene, abs_gamma), fill = post_mean))
+    g <- ggplot(plot_df, aes(x = side, y = reorder(gene_label, abs_gamma), fill = post_mean))
     g <- g + geom_tile(color = "white", linewidth = 0.2)
     g <- g + facet_wrap(~ Program, scales = "free_y", ncol = 2)
     g <- g + scale_fill_gradient2(low = "#2166AC", mid = "white", high = "#B2182B", midpoint = 0)

@@ -8,6 +8,7 @@ By default this version uses trait-specific automatic model selection:
 
 - `TPGM_PROGRAM_N=auto`: select cNMF programs whose shet-matched burden enrichment passes BH-FDR `TPGM_PROGRAM_FDR_THRESHOLD` (default `0.05`).
 - `TPGM_REGULATOR_N=auto`: use `leaps::regsubsets` and BIC to choose the regulator model size, then remove the `shet` covariate and keep the selected cNMF programs. The search is capped by `TPGM_REGULATOR_MAX_N` (default `8`) for runtime and interpretability.
+- `TPGM_MAX_GENES_PER_SIDE=all`: do not truncate graph genes in the output tables. Set this to an integer only when you intentionally want a display-size subset.
 
 Set `TPGM_PROGRAM_N` or `TPGM_REGULATOR_N` to an integer to force a fixed number. The sibling directory `trait_program_gene_model_5program_3regulator` keeps the fixed 5+3 wrapper.
 
@@ -32,9 +33,10 @@ Set `OUTPUT_DIR` to control outputs. Default:
 
 The workflow writes:
 
-- `tables/{trait}_long.tsv`: concordant graph genes, similar to the current panel long table.
+- `tables/{trait}_long.tsv`: graph genes for display; discordant genes are retained with parenthesized `gene_label`.
+- `tables/{trait}_concordant_long.tsv`: concordant-only subset of the graph table.
 - `tables/{trait}_programs.tsv`: selected programs, similar to the current panel program table.
-- `tables/{trait}_gene_predictions.tsv`: all tested graph genes before concordant filtering.
+- `tables/{trait}_gene_predictions.tsv`: all tested graph genes with concordant/discordant flags.
 - `tables/{trait}_program_rank.tsv`: program-burden ranking, including raw `P` and BH-FDR `q_value`.
 - `tables/{trait}_regulator_coefficients.tsv`: regulator model coefficients.
 - `tables/{trait}_permutation.tsv`: permutation summary when `TPGM_PERMUTATION_ITERATIONS > 0`.
