@@ -125,6 +125,9 @@ empty_prediction_table <- function() {
     has_overlap = logical(),
     empty_reason = character(),
     predicted_effect = numeric(),
+    side_predicted_effect = numeric(),
+    proeffect = numeric(),
+    regeffect = numeric(),
     stringsAsFactors = FALSE
   )
 }
@@ -135,6 +138,7 @@ empty_regulator_effect_table <- function() {
     ensg = character(),
     Program = character(),
     beta = numeric(),
+    raw_beta = numeric(),
     p = numeric(),
     fdr = numeric(),
     weighted_effect_program = numeric(),
@@ -316,16 +320,17 @@ extract_regsubsets_programs <- function(fit_summary, row_index) {
 }
 
 select_regulator_model <- function(posterior_df, beta_df, shet_df, regulator_selection, regulator_max_n) {
-  model_df <- merge(posterior_df[, c("gene", "ensg", "post_mean"), drop = FALSE], beta_df, by = c("gene", "ensg"), all = FALSE)
-  model_df <- merge(model_df, shet_df[, c("ensg", "shet"), drop = FALSE], by = "ensg", all = FALSE)
-  program_cols <- grep("^P[0-9]+$", names(model_df), value = TRUE)
-  model_df <- model_df[, c("post_mean", program_cols, "shet"), drop = FALSE]
+  model_full <- merge(posterior_df[, c("gene", "ensg", "post_mean"), drop = FALSE], beta_df, by = c("gene", "ensg"), all = FALSE)
+  model_full <- merge(model_full, shet_df[, c("ensg", "shet"), drop = FALSE], by = "ensg", all = FALSE)
+  program_cols <- grep("^P[0-9]+$", names(model_full), value = TRUE)
+  model_df <- model_full[, c("post_mean", program_cols, "shet"), drop = FALSE]
   for (col in names(model_df)) {
     finite_values <- model_df[[col]][is.finite(model_df[[col]])]
     if (length(finite_values) > 0) {
       model_df[[col]][is.infinite(model_df[[col]])] <- max(finite_values)
     }
   }
+  model_full[, names(model_df)] <- model_df
 
   suppressPackageStartupMessages(library(leaps))
   predictor_n <- length(program_cols) + 1L
@@ -381,7 +386,23 @@ select_regulator_model <- function(posterior_df, beta_df, shet_df, regulator_sel
   coef_df <- coef_df[coef_df$term %in% selected, c("term", "estimate", "std_error", "t_value", "p_value"), drop = FALSE]
   colnames(coef_df)[1] <- "Program"
 
-  return(list(selected = selected, coefficients = coef_df))
+  regulator_effects <- empty_regulator_effect_table()
+  if (length(selected) > 0) {
+    effect_rows <- list()
+    for (program in selected) {
+      effect_rows[[length(effect_rows) + 1]] <- data.frame(
+        gene = model_full$gene,
+        ensg = model_full$ensg,
+        Program = program,
+        beta = lm_df[[program]],
+        raw_beta = model_full[[program]],
+        stringsAsFactors = FALSE
+      )
+    }
+    regulator_effects <- do.call(rbind, effect_rows)
+  }
+
+  return(list(selected = selected, coefficients = coef_df, regulator_effects = regulator_effects))
 }
 
 limit_rows_per_side <- function(df, max_genes_per_side) {
@@ -389,6 +410,14 @@ limit_rows_per_side <- function(df, max_genes_per_side) {
     return(df)
   }
   head(df, max_genes_per_side)
+}
+
+first_nonzero <- function(values) {
+  values <- values[!is.na(values) & values != 0]
+  if (length(values) == 0) {
+    return(0)
+  }
+  values[1]
 }
 
 top_loading_membership <- function(spectra, selected_programs, top_n) {
@@ -418,6 +447,7 @@ build_gene_predictions <- function(
   spectra,
   beta_df,
   p_df,
+  regulator_effects,
   program_rank,
   program_selected,
   regulator_selected,
@@ -432,12 +462,16 @@ build_gene_predictions <- function(
   coef_lookup <- stats::setNames(regulator_coef$estimate, regulator_coef$Program)
 
   loading <- top_loading_membership(spectra, program_selected, top_n)
-  loading_hits <- merge(
-    loading,
-    trait_hits[, c("ensg", "gene", "post_mean"), drop = FALSE],
-    by = c("ensg", "gene"),
-    all = FALSE
-  )
+  if (nrow(loading) > 0) {
+    loading_hits <- merge(
+      loading,
+      trait_hits[, c("ensg", "gene", "post_mean"), drop = FALSE],
+      by = c("ensg", "gene"),
+      all = FALSE
+    )
+  } else {
+    loading_hits <- data.frame()
+  }
   if (nrow(loading_hits) > 0) {
     loading_hits$side <- "program_loading"
     loading_hits$membership_score <- loading_hits$weight
@@ -447,16 +481,14 @@ build_gene_predictions <- function(
     loading_hits <- do.call(rbind, lapply(split(loading_hits, loading_hits$Program), limit_rows_per_side, max_genes_per_side))
   }
 
-  beta_long <- data.frame()
   p_long <- data.frame()
   if (length(regulator_selected) > 0) {
     for (program in regulator_selected) {
-      beta_long <- rbind(beta_long, data.frame(gene = beta_df$gene, ensg = beta_df$ensg, Program = program, beta = beta_df[[program]]))
       p_long <- rbind(p_long, data.frame(gene = p_df$gene, ensg = p_df$ensg, Program = program, p = p_df[[program]]))
     }
-    reg_long <- merge(beta_long, p_long, by = c("gene", "ensg", "Program"), all = FALSE)
+    reg_long <- merge(regulator_effects, p_long, by = c("gene", "ensg", "Program"), all = FALSE)
   } else {
-    reg_long <- data.frame(gene = character(), ensg = character(), Program = character(), beta = numeric(), p = numeric())
+    reg_long <- empty_regulator_effect_table()
   }
   if (nrow(reg_long) > 0) {
     reg_long$fdr <- ave(reg_long$p, reg_long$Program, FUN = function(x) stats::p.adjust(x, method = "BH"))
@@ -511,6 +543,33 @@ build_gene_predictions <- function(
   out$trait_id <- trait_id
   out$abs_gamma <- abs(out$post_mean)
   out$gamma_sign <- sign_to_label(out$post_mean)
+
+  out$side_predicted_effect <- out$predicted_effect
+  program_priority <- stats::setNames(seq_along(program_selected), program_selected)
+  out$program_priority <- ifelse(
+    out$side == "program_loading",
+    unname(program_priority[out$Program]),
+    Inf
+  )
+  out$program_priority[is.na(out$program_priority)] <- Inf
+  program_effect_rows <- out[out$side == "program_loading", c("gene", "ensg", "program_priority", "side_predicted_effect"), drop = FALSE]
+  program_effect_rows <- program_effect_rows[order(program_effect_rows$gene, program_effect_rows$ensg, program_effect_rows$program_priority), , drop = FALSE]
+  if (nrow(program_effect_rows) > 0) {
+    proeffect_df <- aggregate(side_predicted_effect ~ gene + ensg, data = program_effect_rows, FUN = first_nonzero)
+    colnames(proeffect_df)[3] <- "proeffect"
+  } else {
+    proeffect_df <- data.frame(gene = character(), ensg = character(), proeffect = numeric(), stringsAsFactors = FALSE)
+  }
+  regulator_gene_model_effect <- unique(regulator_gene_effect[, c("gene", "ensg", "weighted_effect"), drop = FALSE])
+  colnames(regulator_gene_model_effect)[3] <- "regeffect"
+
+  out <- merge(out, proeffect_df, by = c("gene", "ensg"), all.x = TRUE)
+  out <- merge(out, regulator_gene_model_effect, by = c("gene", "ensg"), all.x = TRUE)
+  out$proeffect[is.na(out$proeffect)] <- 0
+  out$regeffect[is.na(out$regeffect)] <- 0
+  out$predicted_effect <- ifelse(out$proeffect != 0, out$proeffect, out$regeffect)
+  out$program_priority <- NULL
+
   out$predicted_sign <- sign_to_label(out$predicted_effect)
   out$post_mean_sign <- sign_to_label(out$post_mean)
   out$is_concordant <- sign(out$predicted_effect) != 0 & sign(out$post_mean) != 0 & sign(out$predicted_effect) == sign(out$post_mean)
@@ -533,7 +592,8 @@ build_gene_predictions <- function(
     "membership_score", "rank_within_side", "predicted_sign", "post_mean_sign",
     "is_concordant", "is_discordant", "display_bucket", "display_bucket_label",
     "display_column", "display_column_rank", "program_label", "gene_label", "display_rank",
-    "x", "y", "panel_row", "y_global", "has_overlap", "empty_reason", "predicted_effect"
+    "x", "y", "panel_row", "y_global", "has_overlap", "empty_reason", "predicted_effect",
+    "side_predicted_effect", "proeffect", "regeffect"
   )]
 }
 
@@ -554,6 +614,7 @@ run_model <- function(posterior_df, do_permutation = FALSE, seed = NA_integer_) 
     spectra = spectra,
     beta_df = reg_mats$beta,
     p_df = reg_mats$p,
+    regulator_effects = reg_model$regulator_effects,
     program_rank = program_rank,
     program_selected = program_selected,
     regulator_selected = reg_model$selected,
@@ -723,11 +784,11 @@ if (plot_enabled) {
   if (nrow(plot_df) == 0) {
     grDevices::pdf(paste0(plot_prefix, ".pdf"), width = 8, height = 5)
     plot.new()
-    title(main = sprintf("%s: no concordant graph genes", trait_id))
+    title(main = sprintf("%s: no graph genes", trait_id))
     grDevices::dev.off()
     grDevices::png(paste0(plot_prefix, ".png"), width = 8, height = 5, units = "in", res = 300)
     plot.new()
-    title(main = sprintf("%s: no concordant graph genes", trait_id))
+    title(main = sprintf("%s: no graph genes", trait_id))
     grDevices::dev.off()
   } else {
     suppressPackageStartupMessages(library(ggplot2))

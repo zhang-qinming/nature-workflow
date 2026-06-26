@@ -23,17 +23,18 @@ mkdir -p "${META_DIR}"
 mapfile -t ALL_IDS < <(awk -F '\t' 'NR > 1 { sub(/\r$/, "", $2); print $2 }' "${FILE_ID_MAP}")
 
 {
-    printf 'figure_id\tfigure_kind\tsource_id\ttable_long_path\ttable_program_path\tgene_predictions_path\tprogram_rank_path\tregulator_coefficients_path\tpermutation_path\tplot_pdf\tplot_png\tstatus\n'
+    printf 'figure_id\tfigure_kind\tsource_id\ttable_long_path\ttable_concordant_long_path\ttable_program_path\tgene_predictions_path\tprogram_rank_path\tregulator_coefficients_path\tpermutation_path\tplot_pdf\tplot_png\tstatus\n'
     for source_id in "${ALL_IDS[@]}"; do
         status="missing"
         [ -f "${STATUS_DIR}/${source_id}.ok" ] && status="ok"
         [ -f "${STATUS_DIR}/${source_id}.failed" ] && status="failed"
         [ -f "${STATUS_DIR}/${source_id}.running" ] && [ "${status}" = "missing" ] && status="running"
-        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
             "${source_id}" \
             "trait_program_gene_model" \
             "${source_id}" \
             "${TABLES_DIR}/${source_id}_long.tsv" \
+            "${TABLES_DIR}/${source_id}_concordant_long.tsv" \
             "${TABLES_DIR}/${source_id}_programs.tsv" \
             "${TABLES_DIR}/${source_id}_gene_predictions.tsv" \
             "${TABLES_DIR}/${source_id}_program_rank.tsv" \

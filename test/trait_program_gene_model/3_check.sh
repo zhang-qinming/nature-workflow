@@ -29,6 +29,7 @@ reconciled_stale=0
 pdf=0
 png=0
 table_long=0
+table_concordant_long=0
 table_program=0
 gene_predictions=0
 program_rank=0
@@ -75,6 +76,7 @@ for source_id in "${ALL_IDS[@]}"; do
     fi
 
     [ -f "${OUTPUT_DIR}/tables/${source_id}_long.tsv" ] && ((table_long++)) || true
+    [ -f "${OUTPUT_DIR}/tables/${source_id}_concordant_long.tsv" ] && ((table_concordant_long++)) || true
     [ -f "${OUTPUT_DIR}/tables/${source_id}_programs.tsv" ] && ((table_program++)) || true
     [ -f "${OUTPUT_DIR}/tables/${source_id}_gene_predictions.tsv" ] && ((gene_predictions++)) || true
     [ -f "${OUTPUT_DIR}/tables/${source_id}_program_rank.tsv" ] && ((program_rank++)) || true
@@ -109,6 +111,7 @@ echo "PD queue:  ${pd_count}"
 echo "R queue:   ${r_count}"
 echo ""
 echo "Long TSV:                ${table_long}"
+echo "Concordant long TSV:     ${table_concordant_long}"
 echo "Programs TSV:            ${table_program}"
 echo "Gene predictions TSV:    ${gene_predictions}"
 echo "Program rank TSV:        ${program_rank}"

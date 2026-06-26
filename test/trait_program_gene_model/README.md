@@ -12,6 +12,8 @@ By default this version uses trait-specific automatic model selection:
 
 Set `TPGM_PROGRAM_N` or `TPGM_REGULATOR_N` to an integer to force a fixed number. The sibling directory `trait_program_gene_model_5program_3regulator` keeps the fixed 5+3 wrapper.
 
+The graph-gene prediction follows `code.backup/Figure5/6_predict_effectDirection.R`: regulator effects use the scaled program beta values from the refit regression model, regulator FDR is calculated within the model-overlap genes, and final gene concordance uses program effect first, falling back to the summed regulator effect only when the gene is not in a selected program's top-loading set.
+
 ## Required Inputs
 
 - `FILE_ID_MAP`: TSV with `id1`, `id2`, `path1`, `path2`. The workflow iterates over `id2`.
@@ -33,7 +35,7 @@ Set `OUTPUT_DIR` to control outputs. Default:
 
 The workflow writes:
 
-- `tables/{trait}_long.tsv`: graph genes for display; discordant genes are retained with parenthesized `gene_label`.
+- `tables/{trait}_long.tsv`: all graph genes with nonzero final predicted direction; discordant genes are retained with parenthesized `gene_label`.
 - `tables/{trait}_concordant_long.tsv`: concordant-only subset of the graph table.
 - `tables/{trait}_programs.tsv`: selected programs, similar to the current panel program table.
 - `tables/{trait}_gene_predictions.tsv`: all tested graph genes with concordant/discordant flags.
