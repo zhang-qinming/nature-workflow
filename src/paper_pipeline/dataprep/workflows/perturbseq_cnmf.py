@@ -500,6 +500,240 @@ def _build_essential_post_tasks(config: LoadedConfig, ctx: dict) -> list[Task]:
     return _build_essential_postbase_tasks(config, ctx) + _build_essential_association_tasks(config, ctx)
 
 
+def _load_essential_kselect_context(config: LoadedConfig) -> dict:
+    perturbseq = config.workflow("perturbseq")
+    workflow = perturbseq.get("cnmf_essential_kselect", {})
+    if not workflow:
+        raise ConfigError("workflows.perturbseq.cnmf_essential_kselect is required")
+
+    inputs = workflow.get("inputs", {})
+    outputs = workflow.get("outputs", {})
+    parameters = workflow.get("parameters", {})
+
+    if "h5ad" not in inputs:
+        raise ConfigError("workflows.perturbseq.cnmf_essential_kselect.inputs.h5ad is required")
+
+    perturbseq_runner = config.executable_command("perturbseq_runner", [])
+    h5ad_path = config.resolve_path(inputs["h5ad"])
+    cnmf_root = config.resolve_path_or_artifact(
+        outputs.get("cnmf_root"),
+        "perturbseq",
+        "cnmf_essential_kselect",
+        "cNMF",
+    )
+
+    assert h5ad_path
+
+    ks = [int(value) for value in parameters.get("ks", [30, 40, 50, 60, 70, 80, 90, 120])]
+    if not ks:
+        raise ConfigError("workflows.perturbseq.cnmf_essential_kselect.parameters.ks must not be empty")
+    aggregate_name = str(parameters.get("aggregate_name", "cNMF_all"))
+    per_k_name_template = str(parameters.get("per_k_name_template", "cNMF_K{k}"))
+    total_workers = int(parameters.get("total_workers", 20))
+    worker_indices = _parse_worker_indices(
+        parameters,
+        total_workers,
+        "workflows.perturbseq.cnmf_essential_kselect.parameters.worker_indices",
+    )
+    n_iter = int(parameters.get("n_iter", 100))
+    seed = int(parameters.get("seed", 14))
+    numgenes = int(parameters.get("numgenes", 2000))
+
+    return {
+        "workflow": workflow,
+        "perturbseq_runner": perturbseq_runner,
+        "h5ad_path": h5ad_path,
+        "cnmf_root": cnmf_root,
+        "ks": ks,
+        "aggregate_name": aggregate_name,
+        "per_k_name_template": per_k_name_template,
+        "total_workers": total_workers,
+        "worker_indices": worker_indices,
+        "n_iter": n_iter,
+        "seed": seed,
+        "numgenes": numgenes,
+    }
+
+
+def _build_essential_kselect_prepare_tasks(config: LoadedConfig, ctx: dict) -> list[Task]:
+    tasks: list[Task] = [
+        Task(
+            name="Create Perturbseq cNMF essential K-selection output directory",
+            preview=f"Create output directory: {ctx['cnmf_root']}",
+            action=lambda: _ensure_directories([ctx["cnmf_root"]]),
+        )
+    ]
+
+    for k in ctx["ks"]:
+        run_name = ctx["per_k_name_template"].format(k=k)
+        prepare_command = _command_with_runner(
+            ctx["perturbseq_runner"],
+            "cnmf",
+            "prepare",
+            "--output-dir",
+            str(ctx["cnmf_root"]),
+            "--name",
+            run_name,
+            "-c",
+            str(ctx["h5ad_path"]),
+            "-k",
+            str(k),
+            "--n-iter",
+            str(ctx["n_iter"]),
+            "--seed",
+            str(ctx["seed"]),
+            "--numgenes",
+            str(ctx["numgenes"]),
+            "--total-workers",
+            str(ctx["total_workers"]),
+        )
+        tasks.append(
+            Task(
+                name=f"Prepare cNMF essential K-selection run {run_name}",
+                preview=preview_command(prepare_command, cwd=config.project_root),
+                command=prepare_command,
+                cwd=config.project_root,
+            )
+        )
+
+    aggregate_prepare_command = _command_with_runner(
+        ctx["perturbseq_runner"],
+        "cnmf",
+        "prepare",
+        "--output-dir",
+        str(ctx["cnmf_root"]),
+        "--name",
+        ctx["aggregate_name"],
+        "-c",
+        str(ctx["h5ad_path"]),
+        "-k",
+        *[str(value) for value in ctx["ks"]],
+        "--n-iter",
+        str(ctx["n_iter"]),
+        "--seed",
+        str(ctx["seed"]),
+        "--numgenes",
+        str(ctx["numgenes"]),
+        "--total-workers",
+        str(ctx["total_workers"]),
+    )
+    tasks.append(
+        Task(
+            name=f"Prepare aggregate cNMF essential K-selection run {ctx['aggregate_name']}",
+            preview=preview_command(aggregate_prepare_command, cwd=config.project_root),
+            command=aggregate_prepare_command,
+            cwd=config.project_root,
+        )
+    )
+    return tasks
+
+
+def _build_essential_kselect_factorize_tasks(config: LoadedConfig, ctx: dict) -> list[Task]:
+    tasks: list[Task] = []
+    for k in ctx["ks"]:
+        run_name = ctx["per_k_name_template"].format(k=k)
+        for worker_index in ctx["worker_indices"]:
+            factorize_command = _command_with_runner(
+                ctx["perturbseq_runner"],
+                "cnmf",
+                "factorize",
+                "--output-dir",
+                str(ctx["cnmf_root"]),
+                "--name",
+                run_name,
+                "--worker-index",
+                str(worker_index),
+                "--total-workers",
+                str(ctx["total_workers"]),
+            )
+            tasks.append(
+                Task(
+                    name=f"Factorize cNMF essential K-selection {run_name} worker {worker_index + 1}",
+                    preview=preview_command(factorize_command, cwd=config.project_root),
+                    command=factorize_command,
+                    cwd=config.project_root,
+                )
+            )
+    return tasks
+
+
+def _build_essential_kselect_postbase_base_tasks(config: LoadedConfig, ctx: dict) -> list[Task]:
+    per_k_dirs: list[Path] = []
+    per_k_names: list[str] = []
+    for k in ctx["ks"]:
+        run_name = ctx["per_k_name_template"].format(k=k)
+        per_k_dirs.append(ctx["cnmf_root"] / run_name)
+        per_k_names.append(run_name)
+
+    merge_parts: list[str] = []
+    for path, name in zip(per_k_dirs, per_k_names, strict=True):
+        merge_parts.extend(["--source-dir", str(path), "--source-name", name])
+
+    merge_tmp_command = _command_with_runner(
+        ctx["perturbseq_runner"],
+        "paper-pipeline-perturbseq-merge-cnmf-tmp",
+        *merge_parts,
+        "--target-dir",
+        str(ctx["cnmf_root"] / ctx["aggregate_name"]),
+        "--target-name",
+        ctx["aggregate_name"],
+    )
+    combine_command = _command_with_runner(
+        ctx["perturbseq_runner"],
+        "cnmf",
+        "combine",
+        "--output-dir",
+        str(ctx["cnmf_root"]),
+        "--name",
+        ctx["aggregate_name"],
+    )
+    k_selection_command = _command_with_runner(
+        ctx["perturbseq_runner"],
+        "cnmf",
+        "k_selection_plot",
+        "--output-dir",
+        str(ctx["cnmf_root"]),
+        "--name",
+        ctx["aggregate_name"],
+    )
+
+    return [
+        Task(
+            name=f"Merge per-K cNMF essential temporary outputs into {ctx['aggregate_name']}",
+            preview=preview_command(merge_tmp_command, cwd=config.project_root),
+            command=merge_tmp_command,
+            cwd=config.project_root,
+        ),
+        Task(
+            name=f"Combine aggregate cNMF essential workers for {ctx['aggregate_name']}",
+            preview=preview_command(combine_command, cwd=config.project_root),
+            command=combine_command,
+            cwd=config.project_root,
+        ),
+        Task(
+            name=f"Generate cNMF essential K-selection plot for {ctx['aggregate_name']}",
+            preview=preview_command(k_selection_command, cwd=config.project_root),
+            command=k_selection_command,
+            cwd=config.project_root,
+        ),
+    ]
+
+
+def build_perturbseq_cnmf_essential_kselect_prepare_tasks(config: LoadedConfig) -> list[Task]:
+    ctx = _load_essential_kselect_context(config)
+    return _build_essential_kselect_prepare_tasks(config, ctx)
+
+
+def build_perturbseq_cnmf_essential_kselect_factorize_tasks(config: LoadedConfig) -> list[Task]:
+    ctx = _load_essential_kselect_context(config)
+    return _build_essential_kselect_factorize_tasks(config, ctx)
+
+
+def build_perturbseq_cnmf_essential_kselect_postbase_base_tasks(config: LoadedConfig) -> list[Task]:
+    ctx = _load_essential_kselect_context(config)
+    return _build_essential_kselect_postbase_base_tasks(config, ctx)
+
+
 def build_perturbseq_cnmf_essential_prepare_tasks(config: LoadedConfig) -> list[Task]:
     ctx = _load_essential_context(config)
     return _build_essential_prepare_tasks(config, ctx)

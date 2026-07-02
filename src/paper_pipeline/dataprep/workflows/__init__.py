@@ -5,6 +5,9 @@ from ..tasks import Task
 from .genebayes import build_genebayes_cpu_tasks, build_genebayes_gpu_tasks, build_genebayes_tasks
 from .perturbseq_cnmf import (
     build_perturbseq_cnmf_essential_tasks,
+    build_perturbseq_cnmf_essential_kselect_prepare_tasks,
+    build_perturbseq_cnmf_essential_kselect_factorize_tasks,
+    build_perturbseq_cnmf_essential_kselect_postbase_base_tasks,
     build_perturbseq_cnmf_essential_prepare_tasks,
     build_perturbseq_cnmf_essential_factorize_tasks,
     build_perturbseq_cnmf_essential_postbase_tasks,
@@ -53,6 +56,9 @@ __all__ = [
     "build_perturbseq_gene_level_limma_tasks",
     "build_perturbseq_gene_level_summarize_tasks",
     "build_perturbseq_cnmf_essential_tasks",
+    "build_perturbseq_cnmf_essential_kselect_prepare_tasks",
+    "build_perturbseq_cnmf_essential_kselect_factorize_tasks",
+    "build_perturbseq_cnmf_essential_kselect_postbase_base_tasks",
     "build_perturbseq_cnmf_essential_prepare_tasks",
     "build_perturbseq_cnmf_essential_factorize_tasks",
     "build_perturbseq_cnmf_essential_postbase_tasks",
