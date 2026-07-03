@@ -39,6 +39,7 @@ slurm-*.out
 Thumbs.db
 .claude/
 .serena/
+AGENTS.md
 CLAUDE.md
 paper_pipeline.txt
 code.tree
