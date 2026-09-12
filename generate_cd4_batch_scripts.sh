@@ -88,9 +88,24 @@ BATCH_ROOT="$(cd "${BATCH_ROOT}" && pwd)"
 SHARED_ROOT="$(cd "${SHARED_ROOT}" && pwd)"
 JOBS_ROOT="$(cd "${JOBS_ROOT}" && pwd)"
 LOGS_ROOT="$(cd "${LOGS_ROOT}" && pwd)"
+for path_name in BATCH_ROOT PROJECT_ROOT CD4_ROOT; do
+    path_value="${!path_name}"
+    if [[ "${path_value}" == "/" ]]; then
+        echo "FATAL: refusing to use root as ${path_name}" >&2
+        exit 1
+    fi
+done
+if [[ "${BATCH_ROOT}" == "${PROJECT_ROOT}" || "${BATCH_ROOT}" == "${CD4_ROOT}" ]]; then
+    echo "FATAL: BATCH_ROOT must be a dedicated batch-script directory" >&2
+    echo "       BATCH_ROOT=${BATCH_ROOT}" >&2
+    exit 1
+fi
 for name in SHARED_ROOT JOBS_ROOT; do
     value="${!name}"
-    if [[ -z "${value}" || "${value}" == "/" ]]; then echo "Refusing to remove ${name}" >&2; exit 1; fi
+    if [[ -z "${value}" || "${value}" == "/" || "${value}" == "${PROJECT_ROOT}" || "${value}" == "${CD4_ROOT}" ]]; then
+        echo "Refusing to remove ${name}: ${value}" >&2
+        exit 1
+    fi
 done
 rm -rf "${SHARED_ROOT}" "${JOBS_ROOT}"
 mkdir -p "${SHARED_ROOT}" "${JOBS_ROOT}"
@@ -179,7 +194,7 @@ if [[ -s "${CD4_METADATA}" && -s "${CD4_GENE_MAP}" && -s "${CD4_REPORT}" ]]; the
     echo "CD4 pipeline metadata already exists; skipping conversion."
     exit 0
 fi
-python "${STANDARDIZE_SCRIPT}" --input-h5ad "${CD4_INPUT_H5AD}" --output-dir "${CD4_PREPARED_ROOT}" --prefix "${CD4_PREFIX}"
+python "${STANDARDIZE_SCRIPT}" --input-h5ad "${CD4_INPUT_H5AD}" --output-dir "${CD4_PREPARED_ROOT}" --prefix "${CD4_PREFIX}" --force
 EOF
 chmod +x "${SHARED_ROOT}/cd4_prepare_metadata.sh"
 
@@ -243,12 +258,17 @@ EOF
     done
 done
 
-cat > "${BATCH_ROOT}/submit_full_chain.sh" <<'EOF'
-#!/usr/bin/env bash
+{
+printf '%s\n' '#!/usr/bin/env bash'
+printf 'CD4_INPUT_H5AD=%q\n' "${CD4_INPUT_H5AD}"
+printf 'STANDARDIZE_SCRIPT=%q\n' "${STANDARDIZE_SCRIPT}"
+cat <<'EOF'
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SHARED_DIR="$SCRIPT_DIR/shared"
 JOBS_DIR="$SCRIPT_DIR/jobs"
+[[ -s "${CD4_INPUT_H5AD}" ]] || { echo "Missing CD4 h5ad: ${CD4_INPUT_H5AD}" >&2; exit 1; }
+[[ -s "${STANDARDIZE_SCRIPT}" ]] || { echo "Missing CD4 conversion script: ${STANDARDIZE_SCRIPT}" >&2; exit 1; }
 metadata_jobid="$(sbatch --parsable "$SHARED_DIR/cd4_prepare_metadata.sh")"
 echo "metadata preparation jobid: $metadata_jobid"
 prepare_jobid="$(sbatch --parsable --dependency=afterok:$metadata_jobid "$SHARED_DIR/cd4_cnmf_kselect_prepare.sh")"
@@ -277,14 +297,22 @@ for consensus_script in "$JOBS_DIR"/consensus_K*.sh; do
 done
 shopt -u nullglob
 EOF
+} > "${BATCH_ROOT}/submit_full_chain.sh"
 chmod +x "${BATCH_ROOT}/submit_full_chain.sh"
 
-cat > "${BATCH_ROOT}/submit_cnmf_regulation_chain.sh" <<'EOF'
-#!/usr/bin/env bash
+{
+printf '%s\n' '#!/usr/bin/env bash'
+printf 'CD4_METADATA=%q\n' "${CD4_METADATA}"
+printf 'CD4_GENE_MAP=%q\n' "${CD4_GENE_MAP}"
+printf 'CD4_REPORT=%q\n' "${CD4_REPORT}"
+cat <<'EOF'
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SHARED_DIR="$SCRIPT_DIR/shared"
 JOBS_DIR="$SCRIPT_DIR/jobs"
+for required_file in "${CD4_METADATA}" "${CD4_GENE_MAP}" "${CD4_REPORT}"; do
+    [[ -s "${required_file}" ]] || { echo "Missing CD4 pipeline-ready file: ${required_file}" >&2; exit 1; }
+done
 prepare_jobid="$(sbatch --parsable "$SHARED_DIR/cd4_cnmf_kselect_prepare.sh")"
 echo "cNMF prepare jobid: $prepare_jobid"
 factorize_dependency=""
@@ -311,6 +339,7 @@ for consensus_script in "$JOBS_DIR"/consensus_K*.sh; do
 done
 shopt -u nullglob
 EOF
+} > "${BATCH_ROOT}/submit_cnmf_regulation_chain.sh"
 chmod +x "${BATCH_ROOT}/submit_cnmf_regulation_chain.sh"
 
 cat <<EOF
@@ -331,4 +360,3 @@ Skip conversion when pipeline_ready files exist:
   cd ${BATCH_ROOT}
   ./submit_cnmf_regulation_chain.sh
 EOF
-
